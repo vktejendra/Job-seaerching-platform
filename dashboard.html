@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>JobLens — Dashboard</title>
+  <link rel="stylesheet" href="style.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    /* ── Section switching ── */
+    .page-section { display: none; }
+    .page-section.active-section { display: block; }
+
+    /* ── Salary Predictor ── */
+    .predictor-form { background: var(--card-bg, #1a1a2e); border: 1px solid rgba(255,255,255,0.07); border-radius: 16px; padding: 32px; margin-bottom: 24px; }
+    .predictor-form h3 { margin: 0 0 20px; font-size: 18px; color: var(--text-primary, #e0e0ff); }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+    .form-group { display: flex; flex-direction: column; gap: 8px; }
+    .form-group label { font-size: 12px; font-weight: 600; color: var(--text-muted, #8b8ba7); text-transform: uppercase; letter-spacing: 0.06em; }
+    .form-group input, .form-group select {
+      background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 10px; padding: 12px 16px; color: var(--text-primary, #e0e0ff);
+      font-family: 'Space Grotesk', sans-serif; font-size: 14px; outline: none;
+      transition: border-color 0.2s;
+    }
+    .form-group input:focus, .form-group select:focus { border-color: rgba(108,99,255,0.6); }
+    .form-group select option { background: #1a1a2e; }
+    .predict-btn {
+      background: linear-gradient(135deg, #6c63ff, #00e5ff);
+      border: none; border-radius: 12px; padding: 14px 32px;
+      color: #fff; font-family: 'Space Grotesk', sans-serif;
+      font-size: 15px; font-weight: 600; cursor: pointer;
+      transition: opacity 0.2s, transform 0.15s;
+    }
+    .predict-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+    .salary-result-card { background: rgba(108,99,255,0.08); border: 1px solid rgba(108,99,255,0.25); border-radius: 16px; padding: 28px; }
+    .salary-result-title { font-size: 14px; color: var(--text-muted,#8b8ba7); margin-bottom: 20px; }
+    .salary-result-title em { color: var(--text-primary,#e0e0ff); font-style: normal; font-weight: 600; }
+    .salary-bands { display: grid; grid-template-columns: 1fr 1.4fr 1fr; gap: 16px; margin-bottom: 16px; }
+    .salary-band { background: rgba(255,255,255,0.04); border-radius: 12px; padding: 20px; text-align: center; }
+    .salary-band.highlight { background: rgba(108,99,255,0.15); border: 1px solid rgba(108,99,255,0.3); }
+    .band-label { font-size: 11px; color: var(--text-muted,#8b8ba7); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
+    .band-value { font-family: 'DM Mono', monospace; font-size: 22px; font-weight: 600; }
+    .band-value.large { font-size: 30px; color: #6c63ff; }
+    .band-value.green { color: #00c896; }
+    .band-value.cyan  { color: #00e5ff; }
+    .salary-meta { font-size: 12px; color: var(--text-muted,#8b8ba7); margin-top: 12px; }
+    #salaryResult { display: none; }
+
+    /* ── Skill Extractor ── */
+    .skill-extractor-wrap { background: var(--card-bg,#1a1a2e); border: 1px solid rgba(255,255,255,0.07); border-radius: 16px; padding: 32px; margin-bottom: 24px; }
+    .skill-extractor-wrap h3 { margin: 0 0 8px; }
+    .skill-extractor-wrap p { margin: 0 0 16px; color: var(--text-muted,#8b8ba7); font-size: 14px; }
+    .skill-textarea { width: 100%; min-height: 160px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 16px; color: var(--text-primary,#e0e0ff); font-family: 'Space Grotesk',sans-serif; font-size: 14px; resize: vertical; outline: none; box-sizing: border-box; }
+    .skill-textarea:focus { border-color: rgba(108,99,255,0.6); }
+    .extract-btn { margin-top: 14px; background: linear-gradient(135deg, #00c896, #00e5ff); border: none; border-radius: 12px; padding: 13px 28px; color: #0a0a1a; font-family: 'Space Grotesk',sans-serif; font-size: 14px; font-weight: 700; cursor: pointer; transition: opacity 0.2s; }
+    .extract-btn:hover { opacity: 0.85; }
+    .skills-found-header { font-size: 15px; font-weight: 600; margin-bottom: 14px; color: #00c896; }
+    .skills-tags-wrap { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+    .skill-tag-large { background: rgba(108,99,255,0.18); border: 1px solid rgba(108,99,255,0.35); border-radius: 20px; padding: 6px 16px; font-size: 13px; color: #a8a4ff; font-weight: 500; }
+    #skillsResult { display: none; margin-top: 24px; }
+
+    /* ── Explore Section ── */
+    .explore-filters { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
+    .explore-filters select, .explore-filters input {
+      background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 10px; padding: 10px 14px; color: var(--text-primary,#e0e0ff);
+      font-family: 'Space Grotesk',sans-serif; font-size: 13px; outline: none;
+    }
+    .explore-filters select option { background: #1a1a2e; }
+    #exploreCount { font-size: 13px; color: var(--text-muted,#8b8ba7); margin-bottom: 16px; }
+
+    /* ── Trends / Forecast ── */
+    .two-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 28px; }
+    @media (max-width: 900px) { .two-charts { grid-template-columns: 1fr; } .form-grid { grid-template-columns: 1fr; } .salary-bands { grid-template-columns: 1fr; } }
+
+    /* ── Classifier ── */
+    .classify-result-card { background: rgba(0,229,255,0.06); border: 1px solid rgba(0,229,255,0.2); border-radius: 16px; padding: 28px; }
+    .classify-predicted { font-size: 17px; font-weight: 600; color: var(--text-primary,#e0e0ff); margin-bottom: 20px; }
+    .classify-predicted strong { color: #00e5ff; }
+    .classify-top3 { display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px; }
+    .classify-row { display: flex; align-items: center; gap: 12px; }
+    .classify-label { width: 260px; font-size: 13px; color: var(--text-muted,#8b8ba7); flex-shrink: 0; }
+    .classify-bar-wrap { flex: 1; background: rgba(255,255,255,0.05); border-radius: 6px; height: 10px; overflow: hidden; }
+    .classify-bar { height: 100%; border-radius: 6px; transition: width 0.6s ease; }
+    .classify-prob { width: 40px; text-align: right; font-family: 'DM Mono',monospace; font-size: 13px; color: var(--text-primary,#e0e0ff); }
+    #classifyResult { display: none; margin-top: 24px; }
+
+    /* ── Geo section ── */
+    #section-geo .map-card { margin-bottom: 0; }
+
+    /* ── Section title ── */
+    .section-page-title { font-size: 22px; font-weight: 700; color: var(--text-primary,#e0e0ff); margin: 0 0 6px; }
+    .section-page-sub   { font-size: 14px; color: var(--text-muted,#8b8ba7); margin: 0 0 24px; }
+  </style>
+</head>
+<body class="dash-body">
+
+  <!-- Loading Overlay -->
+  <div class="spinner-overlay" id="spinnerOverlay">
+    <div class="spinner"></div>
+    <div class="spinner-text" id="spinnerText">Analysing market data...</div>
+  </div>
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-icon brand-icon-sm"><i class="fas fa-satellite-dish"></i></div>
+      <span>JobLens</span>
+    </div>
+    <div class="user-card">
+      <div class="user-avatar" id="sidebarAvatar">D</div>
+      <div class="user-name"  id="sidebarName">Demo User</div>
+      <div class="user-role"  id="sidebarRole">Data Scientist</div>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label">Main</div>
+      <a class="nav-item active" onclick="showSection('dashboard',this)">
+        <i class="fas fa-th-large"></i> Dashboard
+      </a>
+      <a class="nav-item" onclick="showSection('explore',this)">
+        <i class="fas fa-search"></i> Explore Jobs
+        <span class="nav-badge">17K</span>
+      </a>
+      <a class="nav-item" onclick="showSection('salary',this)">
+        <i class="fas fa-dollar-sign"></i> Salary Predictor
+      </a>
+      <a class="nav-item" onclick="showSection('skills',this)">
+        <i class="fas fa-brain"></i> Skill Extractor
+      </a>
+      <div class="nav-label">Analytics</div>
+      <a class="nav-item" onclick="showSection('trends',this)">
+        <i class="fas fa-chart-line"></i> Demand Trends
+      </a>
+      <a class="nav-item" onclick="showSection('geo',this)">
+        <i class="fas fa-map-marked-alt"></i> Geo Heatmap
+      </a>
+      <a class="nav-item" onclick="showSection('forecast',this)">
+        <i class="fas fa-chart-bar"></i> Hire Forecast
+      </a>
+      <a class="nav-item" onclick="showSection('classify',this)">
+        <i class="fas fa-tags"></i> Job Classifier
+      </a>
+    </div>
+    <div class="sidebar-bottom">
+      <button class="logout-btn" onclick="logout()">
+        <i class="fas fa-sign-out-alt"></i> Sign Out
+      </button>
+    </div>
+  </aside>
+
+  <!-- MAIN CONTENT -->
+  <main class="main-content">
+
+    <!-- Top Bar -->
+    <div class="topbar">
+      <div class="topbar-title">
+        JobLens
+        <span id="pageSub">Global Job Market Intelligence</span>
+      </div>
+      <div class="location-widget" onclick="refreshLocation()" title="Click to refresh">
+        <i class="fas fa-map-marker-alt"></i>
+        <span id="userLocation">Detecting location...</span>
+        <div class="loc-status" id="locStatus"></div>
+      </div>
+      <div class="topbar-actions">
+        <div class="icon-btn"><i class="fas fa-bell"></i><div class="notif-dot"></div></div>
+        <div class="icon-btn"><i class="fas fa-cog"></i></div>
+      </div>
+    </div>
+
+    <div class="dash-content">
+
+      <!-- ══════════════════════════════════════
+           SECTION: DASHBOARD (default)
+      ══════════════════════════════════════ -->
+      <div class="page-section" id="section-dashboard">
+
+        <!-- Search Hero -->
+        <div class="search-hero">
+          <h2><i class="fas fa-search" style="color:var(--accent)"></i> Analyse Any Job Market</h2>
+          <p>Search across <strong>17,350 real Adzuna job postings</strong> (US &amp; UK). Get salary insights, skill analysis, and AI-powered market intelligence.</p>
+          <div class="search-bar-wrap">
+            <div class="search-field">
+              <i class="fas fa-map-marker-alt"></i>
+              <input type="text" id="searchLocation" placeholder="e.g. London, New York, Boston..."
+                oninput="autocomplete('searchLocation','locationSuggestions',LOCATIONS)"
+                onkeydown="if(event.key==='Enter') runSearch()"/>
+              <div class="autocomplete-list" id="locationSuggestions"></div>
+            </div>
+            <div class="search-field">
+              <i class="fas fa-briefcase"></i>
+              <input type="text" id="searchRole" placeholder="e.g. Data Scientist, Nurse, Developer..."
+                oninput="autocomplete('searchRole','roleSuggestions',ROLES)"
+                onkeydown="if(event.key==='Enter') runSearch()"/>
+              <div class="autocomplete-list" id="roleSuggestions"></div>
+            </div>
+            <div class="search-field" style="max-width:200px">
+              <i class="fas fa-tag"></i>
+              <input type="text" id="searchCategory" placeholder="Category (optional)"
+                oninput="autocomplete('searchCategory','catSuggestions',CATEGORIES)"/>
+              <div class="autocomplete-list" id="catSuggestions"></div>
+            </div>
+            <button class="search-btn" onclick="runSearch()">
+              <i class="fas fa-rocket"></i> Analyse
+            </button>
+          </div>
+        </div>
+
+        <!-- KPI Stats -->
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-icon purple"><i class="fas fa-briefcase"></i></div>
+            <div>
+              <div class="stat-value" id="statTotal">17,350</div>
+              <div class="stat-label">Total Postings</div>
+              <div class="stat-change up">↑ Real Adzuna Data</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon cyan"><i class="fas fa-dollar-sign"></i></div>
+            <div>
+              <div class="stat-value" id="statAvgSalary">Loading…</div>
+              <div class="stat-label">Avg Salary</div>
+              <div class="stat-change up">↑ From Dataset</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon green"><i class="fas fa-building"></i></div>
+            <div>
+              <div class="stat-value" id="statCompanies">4,693</div>
+              <div class="stat-label">Companies Hiring</div>
+              <div class="stat-change up">↑ Unique Employers</div>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon orange"><i class="fas fa-globe"></i></div>
+            <div>
+              <div class="stat-value" id="statCountries">US + UK</div>
+              <div class="stat-label">Coverage</div>
+              <div class="stat-change up">↑ Global Dataset</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI Insight Panel -->
+        <div class="ai-panel" id="aiPanel">
+          <div class="ai-panel-header">
+            <div class="ai-avatar">🤖</div>
+            <div>
+              <h3>AI Market Insight</h3>
+              <span id="aiSearchLabel">Run a search above to get personalised analysis</span>
+            </div>
+          </div>
+          <p class="ai-insight-text" id="aiInsightText">Enter a location and role above then click <strong>Analyse</strong> to generate AI-powered insights from the real Adzuna dataset.</p>
+          <div class="ai-chips" id="aiChips"></div>
+        </div>
+
+        <!-- Search Results -->
+        <div class="results-section" id="resultsSection">
+          <div class="results-header">
+            <h3 class="section-title"><i class="fas fa-list"></i> Job Results</h3>
+            <span class="results-count" id="resultsCount">— results found</span>
+          </div>
+          <div class="results-grid" id="resultsGrid"></div>
+        </div>
+
+        <!-- Charts -->
+        <div class="charts-grid">
+          <div class="chart-card">
+            <div class="chart-header">
+              <div><div class="chart-title">Job Demand by Category</div><div class="chart-sub">Real posting distribution across sectors</div></div>
+              <span class="chart-badge live">Live</span>
+            </div>
+            <canvas id="categoryChart" height="220"></canvas>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header">
+              <div><div class="chart-title">Salary Range Distribution</div><div class="chart-sub">Bands from real salary data</div></div>
+              <span class="chart-badge ai">Dataset</span>
+            </div>
+            <canvas id="salaryChart" height="220"></canvas>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header">
+              <div><div class="chart-title">Hiring Trend Over Time</div><div class="chart-sub">Monthly posting volumes (simulated from scale)</div></div>
+              <span class="chart-badge live">Forecast</span>
+            </div>
+            <canvas id="trendChart" height="220"></canvas>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header">
+              <div><div class="chart-title">Contract Type Mix</div><div class="chart-sub">Full-time vs Part-time vs Contract</div></div>
+              <span class="chart-badge ai">EDA</span>
+            </div>
+            <canvas id="contractChart" height="220"></canvas>
+          </div>
+        </div>
+
+        <!-- Geo Map -->
+        <div class="map-card">
+          <div class="chart-header" style="margin-bottom:16px">
+            <div><div class="chart-title section-title"><i class="fas fa-map-marked-alt"></i> Geographic Heatmap</div><div class="chart-sub">Job density across US &amp; UK cities</div></div>
+            <span class="chart-badge live">Geo</span>
+          </div>
+          <div id="geoMap" style="height:320px; border-radius:10px;"></div>
+        </div>
+
+        <!-- Top Skills -->
+        <div class="chart-card" style="margin-bottom:28px">
+          <div class="chart-header">
+            <div><div class="chart-title">Top In-Demand Skills (NLP Extraction)</div><div class="chart-sub">Extracted from real job descriptions · TF-IDF + keyword matching</div></div>
+            <span class="chart-badge ai">NLP</span>
+          </div>
+          <canvas id="skillsChart" height="180"></canvas>
+        </div>
+
+      </div><!-- /section-dashboard -->
+
+
+      <!-- ══════════════════════════════════════
+           SECTION: EXPLORE JOBS
+      ══════════════════════════════════════ -->
+      <div class="page-section" id="section-explore">
+        <p class="section-page-title"><i class="fas fa-search" style="color:var(--accent)"></i> Explore Jobs</p>
+        <p class="section-page-sub">Browse all 600 sampled real Adzuna postings. Filter by category, contract type, or keyword.</p>
+
+        <div class="explore-filters">
+          <select id="exploreCatFilter">
+            <option value="">All Categories</option>
+            <option>IT Jobs</option>
+            <option>Healthcare &amp; Nursing Jobs</option>
+            <option>Sales Jobs</option>
+            <option>Admin Jobs</option>
+            <option>PR, Advertising &amp; Marketing Jobs</option>
+            <option>HR &amp; Recruitment Jobs</option>
+            <option>Logistics &amp; Warehouse Jobs</option>
+            <option>Hospitality &amp; Catering Jobs</option>
+            <option>Teaching Jobs</option>
+            <option>Engineering Jobs</option>
+            <option>Accounting &amp; Finance Jobs</option>
+          </select>
+          <select id="exploreCtFilter">
+            <option value="">All Contract Types</option>
+            <option value="full_time">Full Time</option>
+            <option value="part_time">Part Time</option>
+          </select>
+          <input type="text" id="exploreSearch" placeholder="Search by title or company…" style="flex:1; min-width:180px;"/>
+        </div>
+        <div id="exploreCount" style="font-size:13px;color:var(--text-muted,#8b8ba7);margin-bottom:16px;"></div>
+        <div class="results-grid" id="exploreGrid"></div>
+      </div>
+
+
+      <!-- ══════════════════════════════════════
+           SECTION: SALARY PREDICTOR
+      ══════════════════════════════════════ -->
+      <div class="page-section" id="section-salary">
+        <p class="section-page-title"><i class="fas fa-dollar-sign" style="color:var(--accent)"></i> Salary Predictor</p>
+        <p class="section-page-sub">Enter a job title and filters — the model estimates salary using real Adzuna posting data (GBM-style similarity matching).</p>
+
+        <div class="predictor-form">
+          <h3>Enter Job Details</h3>
+          <div class="form-grid">
+            <div class="form-group" style="grid-column:1/-1">
+              <label>Job Title *</label>
+              <input type="text" id="salaryTitle" placeholder="e.g. Data Scientist, Registered Nurse, Sales Manager…"/>
+            </div>
+            <div class="form-group">
+              <label>Location (optional)</label>
+              <input type="text" id="salaryLocation" placeholder="e.g. London, New York, Boston…"/>
+            </div>
+            <div class="form-group">
+              <label>Category (optional)</label>
+              <select id="salaryCat">
+                <option value="">All Categories</option>
+                <option>IT Jobs</option>
+                <option>Healthcare &amp; Nursing Jobs</option>
+                <option>Sales Jobs</option>
+                <option>Admin Jobs</option>
+                <option>PR, Advertising &amp; Marketing Jobs</option>
+                <option>HR &amp; Recruitment Jobs</option>
+                <option>Engineering Jobs</option>
+                <option>Accounting &amp; Finance Jobs</option>
+                <option>Teaching Jobs</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Contract Type</label>
+              <select id="salaryCt">
+                <option value="">Any</option>
+                <option value="full_time">Full Time</option>
+                <option value="part_time">Part Time</option>
+              </select>
+            </div>
+          </div>
+          <button class="predict-btn" onclick="predictSalary()">
+            <i class="fas fa-robot"></i> Predict Salary
+          </button>
+        </div>
+
+        <div id="salaryResult"></div>
+      </div>
+
+
+      <!-- ══════════════════════════════════════
+           SECTION: SKILL EXTRACTOR
+      ══════════════════════════════════════ -->
+      <div class="page-section" id="section-skills">
+        <p class="section-page-title"><i class="fas fa-brain" style="color:var(--accent)"></i> NLP Skill Extractor</p>
+        <p class="section-page-sub">Paste any job description. The NLP pipeline (keyword taxonomy + TF-IDF matching) extracts technical and soft skills.</p>
+
+        <div class="skill-extractor-wrap">
+          <h3>Job Description Text</h3>
+          <p>Paste a raw job description below and click Extract Skills.</p>
+          <textarea class="skill-textarea" id="skillText"
+            placeholder="e.g. We are looking for a Data Scientist with strong Python and SQL skills. Experience with TensorFlow, AWS, and Agile methodologies is preferred. The role involves building ML pipelines, data analysis, and stakeholder communication..."></textarea>
+          <br/>
+          <button class="extract-btn" onclick="extractSkillsFromText()">
+            <i class="fas fa-magic"></i> Extract Skills
+          </button>
+        </div>
+
+        <div id="skillsResult"></div>
+      </div>
+
+
+      <!-- ══════════════════════════════════════
+           SECTION: DEMAND TRENDS
+      ══════════════════════════════════════ -->
+      <div class="page-section" id="section-trends">
+        <p class="section-page-title"><i class="fas fa-chart-line" style="color:var(--accent)"></i> Demand Trends</p>
+        <p class="section-page-sub">Category-level posting volumes and average salaries — computed directly from the 17,350 Adzuna postings.</p>
+
+        <div class="two-charts">
+          <div class="chart-card">
+            <div class="chart-header">
+              <div><div class="chart-title">Postings by Category</div><div class="chart-sub">Real distribution from full dataset</div></div>
+              <span class="chart-badge live">Live</span>
+            </div>
+            <canvas id="trendsChartCanvas" height="280"></canvas>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header">
+              <div><div class="chart-title">Average Salary by Category</div><div class="chart-sub">Mean salary across job postings</div></div>
+              <span class="chart-badge ai">EDA</span>
+            </div>
+            <canvas id="trendsSalaryCanvas" height="280"></canvas>
+          </div>
+        </div>
+      </div>
+
+
+      <!-- ══════════════════════════════════════
+           SECTION: GEO HEATMAP
+      ══════════════════════════════════════ -->
+      <div class="page-section" id="section-geo">
+        <p class="section-page-title"><i class="fas fa-map-marked-alt" style="color:var(--accent)"></i> Geographic Heatmap</p>
+        <p class="section-page-sub">Job density visualised across US and UK cities using Leaflet.js heatmap layer.</p>
+        <div class="map-card">
+          <div id="geoMapFull" style="height:500px; border-radius:12px;"></div>
+        </div>
+      </div>
+
+
+      <!-- ══════════════════════════════════════
+           SECTION: HIRE FORECAST
+      ══════════════════════════════════════ -->
+      <div class="page-section" id="section-forecast">
+        <p class="section-page-title"><i class="fas fa-chart-bar" style="color:var(--accent)"></i> Hiring Forecast</p>
+        <p class="section-page-sub">Linear trend projection based on historical posting volumes. 3-month forecast shown in dashed line.</p>
+
+        <div class="two-charts">
+          <div class="chart-card" style="grid-column:1/-1">
+            <div class="chart-header">
+              <div><div class="chart-title">Monthly Posting Trend + 3-Month Forecast</div><div class="chart-sub">Historical data + linear regression projection</div></div>
+              <span class="chart-badge live">Forecast</span>
+            </div>
+            <canvas id="forecastCanvas" height="200"></canvas>
+          </div>
+        </div>
+
+        <div class="chart-card">
+          <div class="chart-header">
+            <div><div class="chart-title">Top Hiring Companies</div><div class="chart-sub">Companies with most postings in dataset</div></div>
+            <span class="chart-badge ai">EDA</span>
+          </div>
+          <canvas id="topCompaniesCanvas" height="220"></canvas>
+        </div>
+      </div>
+
+
+      <!-- ══════════════════════════════════════
+           SECTION: JOB CLASSIFIER
+      ══════════════════════════════════════ -->
+      <div class="page-section" id="section-classify">
+        <p class="section-page-title"><i class="fas fa-tags" style="color:var(--accent)"></i> Job Classifier</p>
+        <p class="section-page-sub">Enter a job title and description. The TF-IDF + keyword classifier (trained on real Adzuna categories) predicts the job category.</p>
+
+        <div class="predictor-form">
+          <h3>Job Details to Classify</h3>
+          <div class="form-grid">
+            <div class="form-group" style="grid-column:1/-1">
+              <label>Job Title *</label>
+              <input type="text" id="classifyTitle" placeholder="e.g. Senior Software Engineer, ICU Nurse, Regional Sales Manager…"/>
+            </div>
+            <div class="form-group" style="grid-column:1/-1">
+              <label>Job Description (optional — improves accuracy)</label>
+              <textarea class="skill-textarea" id="classifyDesc" style="min-height:100px"
+                placeholder="Paste a brief description or key responsibilities…"></textarea>
+            </div>
+          </div>
+          <button class="predict-btn" onclick="classifyJob()" style="background:linear-gradient(135deg,#ff6b6b,#ffb347)">
+            <i class="fas fa-tags"></i> Classify Job
+          </button>
+        </div>
+
+        <div id="classifyResult"></div>
+      </div>
+
+    </div><!-- /dash-content -->
+  </main>
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.heat/0.2.0/leaflet-heat.js"></script>
+  <script src="dashboard.js"></script>
+</body>
+</html>

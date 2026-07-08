@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>JobLens — Global Job Intelligence</title>
+  <link rel="stylesheet" href="style.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+</head>
+<body class="auth-body">
+
+  <!-- Animated Background -->
+  <div class="bg-grid"></div>
+  <div class="bg-orbs">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+  </div>
+
+  <!-- Floating Stats Badges -->
+  <div class="floating-badge badge-top-left">
+    <i class="fas fa-briefcase"></i>
+    <span>17,350 Postings</span>
+  </div>
+  <div class="floating-badge badge-top-right">
+    <i class="fas fa-globe"></i>
+    <span>Global Coverage</span>
+  </div>
+  <div class="floating-badge badge-bottom-left">
+    <i class="fas fa-brain"></i>
+    <span>AI-Powered</span>
+  </div>
+
+  <!-- Main Auth Container -->
+  <div class="auth-wrapper">
+
+    <!-- Left Panel -->
+    <div class="auth-left">
+      <div class="brand">
+        <div class="brand-icon"><i class="fas fa-satellite-dish"></i></div>
+        <span class="brand-name">JobLens</span>
+      </div>
+      <h1 class="auth-headline">
+        Decode the<br/>
+        <span class="highlight-text">Job Market</span><br/>
+        with Precision.
+      </h1>
+      <p class="auth-sub">
+        Real-time salary intelligence, skill extraction, hiring forecasts, and geospatial analysis — powered by 17,350 global postings.
+      </p>
+
+      <div class="feature-pills">
+        <div class="pill"><i class="fas fa-chart-line"></i> Salary Prediction</div>
+        <div class="pill"><i class="fas fa-map-marked-alt"></i> Geo Heatmaps</div>
+        <div class="pill"><i class="fas fa-robot"></i> NLP Skill Mining</div>
+        <div class="pill"><i class="fas fa-chart-bar"></i> Demand Forecasting</div>
+      </div>
+
+      <div class="dataset-badge">
+        <i class="fas fa-database"></i>
+        <div>
+          <strong>Adzuna Dataset</strong>
+          <span>17,350 postings · 18 attributes · Global</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Panel — Auth Form -->
+    <div class="auth-right">
+      <div class="auth-card">
+
+        <!-- Tab Switcher -->
+        <div class="tab-bar">
+          <button class="tab-btn active" id="loginTab" onclick="switchTab('login')">Login</button>
+          <button class="tab-btn" id="registerTab" onclick="switchTab('register')">Register</button>
+          <div class="tab-indicator" id="tabIndicator"></div>
+        </div>
+
+        <!-- LOGIN FORM -->
+        <div class="form-section active" id="loginForm">
+          <div class="form-header">
+            <h2>Welcome back</h2>
+            <p>Sign in to your JobLens account</p>
+          </div>
+
+          <div class="input-group">
+            <label>Email Address</label>
+            <div class="input-wrap">
+              <i class="fas fa-envelope"></i>
+              <input type="email" id="loginEmail" placeholder="you@example.com" autocomplete="off"/>
+            </div>
+          </div>
+
+          <div class="input-group">
+            <label>Password</label>
+            <div class="input-wrap">
+              <i class="fas fa-lock"></i>
+              <input type="password" id="loginPassword" placeholder="Your password"/>
+              <i class="fas fa-eye toggle-eye" onclick="togglePwd('loginPassword', this)"></i>
+            </div>
+          </div>
+
+          <div class="form-meta">
+            <label class="checkbox-label">
+              <input type="checkbox" id="rememberMe"/>
+              <span class="custom-check"></span>
+              Remember me
+            </label>
+            <a href="#" class="forgot-link">Forgot password?</a>
+          </div>
+
+          <button class="auth-btn" onclick="handleLogin()">
+            <span>Sign In</span>
+            <i class="fas fa-arrow-right"></i>
+          </button>
+
+          <div class="divider"><span>or continue with</span></div>
+
+          <div class="social-btns">
+            <button class="social-btn" onclick="demoLogin()">
+              <i class="fas fa-flask"></i> Demo Access
+            </button>
+            <button class="social-btn">
+              <i class="fab fa-google"></i> Google
+            </button>
+          </div>
+
+          <p class="switch-text">Don't have an account? <a onclick="switchTab('register')">Register free</a></p>
+        </div>
+
+        <!-- REGISTER FORM -->
+        <div class="form-section" id="registerForm">
+          <div class="form-header">
+            <h2>Create account</h2>
+            <p>Start exploring the job market</p>
+          </div>
+
+          <div class="input-row">
+            <div class="input-group">
+              <label>First Name</label>
+              <div class="input-wrap">
+                <i class="fas fa-user"></i>
+                <input type="text" id="regFirstName" placeholder="John"/>
+              </div>
+            </div>
+            <div class="input-group">
+              <label>Last Name</label>
+              <div class="input-wrap">
+                <i class="fas fa-user"></i>
+                <input type="text" id="regLastName" placeholder="Doe"/>
+              </div>
+            </div>
+          </div>
+
+          <div class="input-group">
+            <label>Email Address</label>
+            <div class="input-wrap">
+              <i class="fas fa-envelope"></i>
+              <input type="email" id="regEmail" placeholder="you@example.com"/>
+            </div>
+          </div>
+
+          <div class="input-group">
+            <label>Job Role Interest</label>
+            <div class="input-wrap">
+              <i class="fas fa-briefcase"></i>
+              <input type="text" id="regRole" placeholder="e.g. Data Scientist, Developer"/>
+            </div>
+          </div>
+
+          <div class="input-group">
+            <label>Password</label>
+            <div class="input-wrap">
+              <i class="fas fa-lock"></i>
+              <input type="password" id="regPassword" placeholder="Min. 8 characters"/>
+              <i class="fas fa-eye toggle-eye" onclick="togglePwd('regPassword', this)"></i>
+            </div>
+            <div class="strength-bar">
+              <div class="strength-fill" id="strengthFill"></div>
+            </div>
+            <span class="strength-label" id="strengthLabel"></span>
+          </div>
+
+          <div class="input-group">
+            <label>Confirm Password</label>
+            <div class="input-wrap">
+              <i class="fas fa-lock"></i>
+              <input type="password" id="regConfirm" placeholder="Repeat password"/>
+            </div>
+          </div>
+
+          <div class="terms-row">
+            <label class="checkbox-label">
+              <input type="checkbox" id="agreeTerms"/>
+              <span class="custom-check"></span>
+              I agree to <a href="#">Terms</a> and <a href="#">Privacy Policy</a>
+            </label>
+          </div>
+
+          <button class="auth-btn" onclick="handleRegister()">
+            <span>Create Account</span>
+            <i class="fas fa-rocket"></i>
+          </button>
+
+          <p class="switch-text">Already have an account? <a onclick="switchTab('login')">Sign in</a></p>
+        </div>
+
+        <!-- Toast Notification -->
+        <div class="toast" id="toast"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="auth.js"></script>
+</body>
+</html>
