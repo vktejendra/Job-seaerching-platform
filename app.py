@@ -153,10 +153,16 @@ def demand_trends():
 
     tmp = df.copy()
 
-    tmp["month"] = pd.to_datetime(
+    tmp["month"] = (
+    pd.to_datetime(
         tmp["created"],
+        utc=True,
         errors="coerce"
-    ).dt.to_period("M").astype(str)
+    )
+    .dt.tz_localize(None)
+    .dt.to_period("M")
+    .astype(str)
+)
 
     if cat:
         tmp = tmp[
@@ -248,12 +254,66 @@ def top_skills():
 
 
 # ─────────────────────────────────────────
+# TOP HIRING COMPANIES
+# ─────────────────────────────────────────
+@app.route("/api/top-companies")
+def top_companies():
+    df = get_df()
+    cat = request.args.get("category", None)
+    limit = int(request.args.get("limit", 10))
+
+    tmp = df.copy()
+    if cat:
+        tmp = tmp[tmp["category_label"].str.lower() == cat.lower()]
+
+    counts = (
+        tmp[tmp["company"] != ""]["company"]
+        .value_counts()
+        .head(limit)
+    )
+
+    return jsonify([{"company": k, "count": int(v)} for k, v in counts.items()])
+
+
+# ─────────────────────────────────────────
+# AVERAGE SALARY BY CATEGORY
+# ─────────────────────────────────────────
+@app.route("/api/salary-by-category")
+def salary_by_category():
+    df = get_df()
+    limit = int(request.args.get("limit", 10))
+
+    tmp = df[df["salary_mid"].notna() & (df["category_label"] != "")]
+
+    top_cats = tmp["category_label"].value_counts().head(limit).index
+    avg_salary = (
+        tmp[tmp["category_label"].isin(top_cats)]
+        .groupby("category_label")["salary_mid"]
+        .mean()
+        .reindex(top_cats)
+    )
+
+    return jsonify([
+        {"category": k, "avg_salary": float(v)} for k, v in avg_salary.items()
+    ])
+
+
+# ─────────────────────────────────────────
 # HIRING FORECAST
 # ─────────────────────────────────────────
 @app.route("/api/forecast")
 def forecast():
-    df = get_df()
-    df["month"] = pd.to_datetime(df["created"], errors="coerce").dt.to_period("M").astype(str)
+    df = get_df().copy()
+    df["month"] = (
+    pd.to_datetime(
+        df["created"],
+        utc=True,
+        errors="coerce"
+    )
+    .dt.tz_localize(None)
+    .dt.to_period("M")
+    .astype(str)
+)
     monthly = df.groupby("month").size().reset_index(name="count").tail(12)
 
     # Simple linear trend forecast (3 months)
