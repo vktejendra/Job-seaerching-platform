@@ -129,6 +129,13 @@ async function runSearch() {
 
         const data = await response.json();
         updateChartsForSearch(data.jobs);
+        renderResults(data.jobs);
+
+renderAIInsight(
+    data.jobs,
+    location,
+    role
+);
 
          console.log(data);
 
@@ -570,6 +577,233 @@ console.log("Geo Count:", data.length);
     }
 }
 
+// ---- ANALYTICS SECTIONS (Trends / Geo / Forecast) ----
+// These three pages each have their own canvases/map div that were
+// never wired up to any data. Track load-state per section so we only
+// build each Chart.js instance / Leaflet map once (re-creating a Chart
+// on a canvas that already has one throws "Canvas is already in use").
+const sectionsLoaded = { trends: false, geo: false, forecast: false };
+
+async function loadTrendsSection() {
+  if (sectionsLoaded.trends) return;
+  sectionsLoaded.trends = true;
+
+  const gridColor = 'rgba(255,255,255,0.05)';
+  const fontColor = '#8b8ba7';
+
+  try {
+    // Postings by category
+    const statsRes = await fetch(`${API}/eda/stats`);
+    const stats = await statsRes.json();
+
+    charts.trendsCategory = new Chart(document.getElementById('trendsChartCanvas'), {
+      type: 'bar',
+      data: {
+        labels: Object.keys(stats.top_categories),
+        datasets: [{
+          label: 'Postings',
+          data: Object.values(stats.top_categories),
+          backgroundColor: 'rgba(108,99,255,0.7)',
+          borderRadius: 6
+        }]
+      },
+      options: barOptions(gridColor, fontColor, false)
+    });
+
+    // Average salary by category
+    const salaryRes = await fetch(`${API}/salary-by-category`);
+    const salaryData = await salaryRes.json();
+
+    charts.trendsSalary = new Chart(document.getElementById('trendsSalaryCanvas'), {
+      type: 'bar',
+      data: {
+        labels: salaryData.map(x => x.category),
+        datasets: [{
+          label: 'Avg Salary',
+          data: salaryData.map(x => Math.round(x.avg_salary)),
+          backgroundColor: 'rgba(0,229,255,0.7)',
+          borderRadius: 6
+        }]
+      },
+      options: barOptions(gridColor, fontColor, false)
+    });
+  } catch (err) {
+    console.error('Trends section load failed:', err);
+  }
+}
+
+let geoMapFullInstance;
+async function loadGeoFullSection() {
+  if (sectionsLoaded.geo) {
+    // Map already exists but container may have been hidden (display:none)
+    // when it was first drawn, so its dimensions were wrong. Fix that now.
+    setTimeout(() => geoMapFullInstance && geoMapFullInstance.invalidateSize(), 200);
+    return;
+  }
+  sectionsLoaded.geo = true;
+
+  try {
+    geoMapFullInstance = L.map('geoMapFull').setView([20, 0], 2);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '© CARTO'
+    }).addTo(geoMapFullInstance);
+
+    const res = await fetch(`${API}/geo?limit=5000`);
+    const data = await res.json();
+
+    const heatData = data
+      .filter(item => item.latitude && item.longitude)
+      .map(item => [item.latitude, item.longitude, 0.7]);
+
+    if (typeof L.heatLayer !== 'undefined') {
+      L.heatLayer(heatData, { radius: 35, blur: 25 }).addTo(geoMapFullInstance);
+    }
+
+    setTimeout(() => geoMapFullInstance.invalidateSize(), 200);
+  } catch (err) {
+    console.error('Geo section load failed:', err);
+  }
+}
+
+async function loadForecastSection() {
+  if (sectionsLoaded.forecast) return;
+  sectionsLoaded.forecast = true;
+
+  const gridColor = 'rgba(255,255,255,0.05)';
+  const fontColor = '#8b8ba7';
+
+  try {
+    const res = await fetch(`${API}/forecast`);
+    const data = await res.json();
+
+    const historicalMonths = data.historical.map(x => x.month);
+    const historicalCounts = data.historical.map(x => x.count);
+
+    // Build forecast month labels continuing on from the last historical month
+    const lastDate = new Date(historicalMonths[historicalMonths.length - 1] + '-01');
+    const forecastMonths = data.forecast_values.map((_, i) => {
+      const d = new Date(lastDate);
+      d.setMonth(d.getMonth() + i + 1);
+      return d.toISOString().slice(0, 7);
+    });
+
+    const labels = [...historicalMonths, ...forecastMonths];
+
+    // Historical series (nulls after the historical range)
+    const historicalSeries = [...historicalCounts, ...forecastMonths.map(() => null)];
+
+    // Forecast series (nulls before it starts, bridged from the last historical point)
+    const forecastSeries = [
+      ...historicalMonths.map(() => null),
+      historicalCounts[historicalCounts.length - 1],
+      ...data.forecast_values.slice(1)
+    ];
+
+    charts.forecast = new Chart(document.getElementById('forecastCanvas'), {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          {
+            label: 'Historical Postings',
+            data: historicalSeries,
+            borderColor: 'rgba(108,99,255,1)',
+            backgroundColor: 'rgba(108,99,255,0.12)',
+            tension: 0.4, fill: true, pointRadius: 4,
+            pointBackgroundColor: 'rgba(108,99,255,1)',
+          },
+          {
+            label: 'Forecast (3mo)',
+            data: forecastSeries,
+            borderColor: 'rgba(255,179,71,1)',
+            backgroundColor: 'transparent',
+            borderDash: [6, 4],
+            tension: 0.4, pointRadius: 4,
+            pointBackgroundColor: 'rgba(255,179,71,1)',
+          }
+        ]
+      },
+      options: { ...lineOptions(gridColor, fontColor), plugins: { legend: { display: true, labels: { color: fontColor } } } }
+    });
+
+    // Top hiring companies
+    const compRes = await fetch(`${API}/top-companies`);
+    const companies = await compRes.json();
+
+    charts.topCompanies = new Chart(document.getElementById('topCompaniesCanvas'), {
+      type: 'bar',
+      data: {
+        labels: companies.map(c => c.company),
+        datasets: [{
+          label: 'Postings',
+          data: companies.map(c => c.count),
+          backgroundColor: 'rgba(0,200,150,0.7)',
+          borderRadius: 6
+        }]
+      },
+      options: { indexAxis: 'y', ...barOptions(gridColor, fontColor, false) }
+    });
+  } catch (err) {
+    console.error('Forecast section load failed:', err);
+  }
+}
+async function loadExploreJobs(){
+
+    try{
+
+        const response =
+            await fetch(`${API}/search`);
+
+        const data =
+            await response.json();
+
+        const grid =
+            document.getElementById("exploreGrid");
+
+        document.getElementById("exploreCount").innerHTML =
+            `${data.count} Jobs`;
+
+        grid.innerHTML =
+            data.jobs.map(job=>`
+
+            <div class="job-card">
+
+                <h3>${job.title}</h3>
+
+                <p>${job.company}</p>
+
+                <p>${job.location_display}</p>
+
+                <p>
+
+                $${Math.round(job.salary_min)}
+
+                -
+
+                $${Math.round(job.salary_max)}
+
+                </p>
+
+                <a href="${job.redirect_url}" target="_blank">
+
+                Apply
+
+                </a>
+
+            </div>
+
+            `).join("");
+
+    }
+
+    catch(err){
+
+        console.error(err);
+
+    }
+
+}
+
 // ---- SPINNER ----
 function showSpinner(text) {
   document.getElementById('spinnerOverlay').classList.add('show');
@@ -614,26 +848,172 @@ function showSection(name, element) {
         classify: 'Job Category Classifier'
     })[name] || '';
 
-    // Fix Leaflet map rendering when section becomes visible
-    if (name === "geo" && typeof geoMap !== "undefined") {
+    
+if (name === "explore") {
 
-        setTimeout(() => {
+    loadExploreJobs();
 
-            geoMap.invalidateSize();
+} else if (name === "trends") {
 
-        }, 300);
+    loadTrendsSection();
+
+} else if (name === "geo") {
+
+    loadGeoFullSection();
+
+} else if (name === "forecast") {
+
+    loadForecastSection();
+
+}
+}
+async function predictSalary() {
+
+    const title = document.getElementById("salaryTitle").value;
+    const location = document.getElementById("salaryLocation").value;
+    const category = document.getElementById("salaryCat").value;
+    const contract = document.getElementById("salaryCt").value;
+
+    if (!title.trim()) {
+        alert("Enter a job title.");
+        return;
+    }
+
+    try {
+
+        const response = await fetch(`${API}/predict-salary`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                title,
+                location,
+                category,
+                contract_time: contract
+            })
+        });
+
+        const data = await response.json();
+
+        const result = document.getElementById("salaryResult");
+
+        result.style.display = "block";
+
+        result.innerHTML = `
+        <div class="salary-result-card">
+
+            <div class="salary-result-title">
+                Estimated salary for <em>${title}</em>
+            </div>
+
+            <div class="salary-bands">
+
+                <div class="salary-band">
+                    <div class="band-label">Minimum</div>
+                    <div class="band-value green">
+                        $${Math.round(data.salary_min).toLocaleString()}
+                    </div>
+                </div>
+
+                <div class="salary-band highlight">
+                    <div class="band-label">Average</div>
+                    <div class="band-value large">
+                        $${Math.round(data.salary_mid).toLocaleString()}
+                    </div>
+                </div>
+
+                <div class="salary-band">
+                    <div class="band-label">Maximum</div>
+                    <div class="band-value cyan">
+                        $${Math.round(data.salary_max).toLocaleString()}
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+        `;
 
     }
+    catch (err) {
+
+        console.error(err);
+
+        alert("Salary prediction failed.");
+
+    }
+
 }
-async function loadForecast() {
 
-    const response =
-        await fetch(`${API}/forecast`);
+async function classifyJob() {
 
-    const data =
-        await response.json();
+    const title =
+        document.getElementById("classifyTitle").value;
 
-    console.log(data);
+    const description =
+        document.getElementById("classifyDesc").value;
+
+    if (!title.trim()) {
+
+        alert("Enter a job title.");
+
+        return;
+
+    }
+
+    try {
+
+        const response = await fetch(`${API}/classify`, {
+
+            method: "POST",
+
+            headers: {
+                "Content-Type": "application/json"
+            },
+
+            body: JSON.stringify({
+
+                title,
+
+                description
+
+            })
+
+        });
+
+        const data = await response.json();
+
+        const result =
+            document.getElementById("classifyResult");
+
+        result.style.display = "block";
+
+        result.innerHTML = `
+
+        <div class="classify-result-card">
+
+            <div class="classify-predicted">
+
+                Predicted Category:
+
+                <strong>${data.category}</strong>
+
+            </div>
+
+        </div>
+
+        `;
+
+    }
+
+    catch(err){
+
+        console.error(err);
+
+        alert("Classification failed.");
+
+    }
 
 }
 async function extractSkillsFromText(){
