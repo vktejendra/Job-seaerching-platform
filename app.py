@@ -31,6 +31,17 @@ def get_df():
     return df_global
 
 
+def _clean_nans(record: dict) -> dict:
+    """Replace NaN/inf float values with None so jsonify produces valid JSON.
+    Pandas can't hold None inside a float64 column (it silently reverts to
+    NaN), so this must run on plain Python dicts *after* to_dict(), not on
+    the DataFrame itself."""
+    for k, v in record.items():
+        if isinstance(v, float) and (np.isnan(v) or np.isinf(v)):
+            record[k] = None
+    return record
+
+
 # ─────────────────────────────────────────
 # HEALTH CHECK
 # ─────────────────────────────────────────
@@ -45,10 +56,12 @@ def health():
 @app.route("/api/search")
 def search():
     df   = get_df()
-    loc  = request.args.get("location", "").lower()
-    role = request.args.get("role", "").lower()
-    cat  = request.args.get("category", "").lower()
-    
+    loc      = request.args.get("location", "").lower()
+    role     = request.args.get("role", "").lower()
+    cat      = request.args.get("category", "").lower()
+    contract = request.args.get("contract_time", "").lower()
+    limit    = int(request.args.get("limit", 50))
+
     mask = pd.Series([True] * len(df), index=df.index)
     if loc:
         mask &= (
@@ -58,22 +71,30 @@ def search():
     if role:
         mask &= (
             df["title"].str.lower().str.contains(role, na=False) |
+            df["company"].str.lower().str.contains(role, na=False) |
             df["description"].str.lower().str.contains(role, na=False)
         )
     if cat:
         mask &= df["category_label"].str.lower().str.contains(cat, na=False)
-    
-    results = df[mask].head(50)
+    if contract:
+        mask &= df["contract_time"].str.lower() == contract
+
+    results = df[mask].head(limit)
+
+    jobs_df = results[[
+        "job_id", "title", "company", "location_display",
+        "contract_time", "contract_type",
+        "salary_min", "salary_max", "salary_is_predicted",
+        "category_label", "redirect_url", "created",
+        "latitude", "longitude"
+    ]].copy()
+
+    jobs = jobs_df.to_dict(orient="records")
+    jobs = [_clean_nans(job) for job in jobs]
 
     return jsonify({
         "count": int(len(results)),
-        "jobs":  results[[
-            "job_id", "title", "company", "location_display",
-            "contract_time", "contract_type",
-            "salary_min", "salary_max", "salary_is_predicted",
-            "category_label", "redirect_url", "created",
-            "latitude", "longitude"
-        ]].to_dict(orient="records")
+        "jobs":  jobs
     })
 
 # ─────────────────────────────────────────
@@ -88,7 +109,25 @@ def predict_salary_endpoint():
     contract = body.get("contract_time", "full_time")
 
     try:
-        result = predict_salary(title, location, category, contract)
+        raw = predict_salary(title, location, category, contract)
+        # model_training.predict_salary() returns
+        # predicted_salary_min/mid/max, but the dashboard reads
+        # salary_min/mid/max — remap here so the frontend actually
+        # receives the numbers instead of undefined -> NaN.
+        result = {
+            "title": raw.get("title"),
+            "location": raw.get("location"),
+            "category": raw.get("category"),
+            "salary_min": raw.get("predicted_salary_min"),
+            "salary_mid": raw.get("predicted_salary_mid"),
+            "salary_max": raw.get("predicted_salary_max"),
+            "currency": raw.get("currency"),
+            "model_mae": raw.get("model_mae"),
+        }
+        # predict_salary() can still legitimately produce NaN in edge
+        # cases (e.g. degenerate model output), so keep the NaN-scrubber
+        # every other endpoint uses.
+        result = _clean_nans(result)
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -96,6 +135,7 @@ def predict_salary_endpoint():
 
 # ──────────────────────────────────────
 # NLP SKILL EXTRACTION
+
 # ─────────────────────────────────────────
 @app.route("/api/extract-skills", methods=["POST"])
 def extract_skills_endpoint():
@@ -115,7 +155,15 @@ def classify_endpoint():
     title = body.get("title", "")
     desc  = body.get("description", "")
     try:
-        result = classify_category(title, desc)
+        raw = classify_category(title, desc)
+        # model_training.classify_category() returns "predicted_category",
+        # but the dashboard reads data.category -- remap so the predicted
+        # label actually shows up instead of undefined.
+        result = {
+            "category": raw.get("predicted_category"),
+            "top3": raw.get("top3"),
+            "accuracy": raw.get("accuracy"),
+        }
         return jsonify(result)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -153,16 +201,10 @@ def demand_trends():
 
     tmp = df.copy()
 
-    tmp["month"] = (
-    pd.to_datetime(
+    tmp["month"] = pd.to_datetime(
         tmp["created"],
-        utc=True,
         errors="coerce"
-    )
-    .dt.tz_localize(None)
-    .dt.to_period("M")
-    .astype(str)
-)
+    ).dt.to_period("M").astype(str)
 
     if cat:
         tmp = tmp[
@@ -183,6 +225,22 @@ def demand_trends():
         trend.to_dict(orient="records")
     )
 # ─────────────────────────────────────────
+# GEO SUMMARY (chart-based breakdown by country/city)
+# ─────────────────────────────────────────
+@app.route("/api/geo-summary")
+def geo_summary():
+    df = get_df()
+
+    by_country = df[df["country"] != "Unknown"]["country"].value_counts().head(10)
+    by_city = df[df["location_display"] != ""]["location_display"].value_counts().head(12)
+
+    return jsonify({
+        "by_country": [{"country": k, "count": int(v)} for k, v in by_country.items()],
+        "by_city": [{"city": k, "count": int(v)} for k, v in by_city.items()]
+    })
+
+
+# ─────────────────────────────────────────
 # GEO DATA (Heatmap Points)
 # ─────────────────────────────────────────
 @app.route("/api/geo")
@@ -192,45 +250,43 @@ def geo_data():
     loc = request.args.get("location", "").lower()
     limit = int(request.args.get("limit", 2000))
 
-    # Keep only rows with coordinates
     tmp = df[
         df["latitude"].notna() &
         df["longitude"].notna()
     ].copy()
 
-    # Optional location filter
     if loc:
         tmp = tmp[
             tmp["location_display"].str.lower().str.contains(loc, na=False) |
             tmp["location_area"].str.lower().str.contains(loc, na=False)
         ]
 
-    # Select required columns
-    sample = tmp[[
-        "latitude",
-        "longitude",
-        "salary_max",
-        "category_label"
-    ]].copy()
+    sample = tmp[
+        ["latitude", "longitude"]
+    ].copy()
 
-    # Remove NaN / Infinity values
     sample = sample.replace([np.inf, -np.inf], np.nan)
 
-    # Remove rows that would break JSON
     sample = sample.dropna(
-        subset=["latitude", "longitude", "salary_max"]
+        subset=["latitude", "longitude"]
     )
 
-    # Apply limit after cleaning
-    if len(sample) > limit:
-        sample = sample.sample(limit)
+    sample["latitude"] = sample["latitude"].round(2)
+    sample["longitude"] = sample["longitude"].round(2)
 
-    # Debug
-    print("Geo rows returned:", len(sample))
-    print("NaN salary_max:", sample["salary_max"].isna().sum())
+    heatmap = (
+        sample.groupby(["latitude", "longitude"])
+        .size()
+        .reset_index(name="job_count")
+    )
+
+    if len(heatmap) > limit:
+        heatmap = heatmap.sample(limit, random_state=42)
+
+    print("Heatmap Points:", len(heatmap))
 
     return jsonify(
-        sample.to_dict(orient="records")
+        heatmap.to_dict(orient="records")
     )
 
 # ─────────────────────────────────────────
@@ -303,17 +359,8 @@ def salary_by_category():
 # ─────────────────────────────────────────
 @app.route("/api/forecast")
 def forecast():
-    df = get_df().copy()
-    df["month"] = (
-    pd.to_datetime(
-        df["created"],
-        utc=True,
-        errors="coerce"
-    )
-    .dt.tz_localize(None)
-    .dt.to_period("M")
-    .astype(str)
-)
+    df = get_df()
+    df["month"] = pd.to_datetime(df["created"], errors="coerce").dt.to_period("M").astype(str)
     monthly = df.groupby("month").size().reset_index(name="count").tail(12)
 
     # Simple linear trend forecast (3 months)
