@@ -102,7 +102,16 @@ def _clean_text_fields(df: pd.DataFrame) -> pd.DataFrame:
 def _parse_dates(df: pd.DataFrame) -> pd.DataFrame:
     df["created"] = pd.to_datetime(df["created"], errors="coerce", utc=True)
     df["created_date"]  = df["created"].dt.date
-    df["created_month"] = df["created"].dt.to_period("M").astype(str)
+    df["created_month"] = (
+    pd.to_datetime(
+        df["created"],
+        utc=True,
+        errors="coerce"
+    )
+    .dt.tz_localize(None)
+    .dt.to_period("M")
+    .astype(str)
+)
     df["created_year"]  = df["created"].dt.year
     null_dates = df["created"].isna().sum()
     if null_dates:

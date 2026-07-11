@@ -88,12 +88,99 @@
     .classify-prob { width: 40px; text-align: right; font-family: 'DM Mono',monospace; font-size: 13px; color: var(--text-primary,#e0e0ff); }
     #classifyResult { display: none; margin-top: 24px; }
 
-    /* ── Geo section ── */
+    /* ── Geo section (Leaflet heatmap, styled like a light density map) ── */
     #section-geo .map-card { margin-bottom: 0; }
+    #geoMapContainer { background: #e8e8ec; }
+    #geoMapContainer .leaflet-control-attribution {
+      background: rgba(255,255,255,0.85) !important;
+      color: #555 !important;
+      font-size: 10px;
+    }
+    #geoMapContainer .leaflet-control-attribution a { color: #333 !important; }
+
+    #geoTitleCard {
+      position: absolute; top: 18px; left: 50%; transform: translateX(-50%);
+      background: #fff; color: #1a1a2e; font-family: 'Space Grotesk', sans-serif;
+      font-weight: 700; font-size: 18px; letter-spacing: 0.01em;
+      padding: 14px 28px; border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.25); z-index: 500; pointer-events: none;
+    }
+
+    #geoLegendPanel {
+      position: absolute; top: 18px; right: 18px; z-index: 500;
+      background: rgba(255,255,255,0.95); border-radius: 10px;
+      padding: 12px 16px 14px; box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+      font-family: 'Space Grotesk', sans-serif; min-width: 190px;
+      color: #2a2a3a;
+    }
+    .geo-legend-row { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 3px 0; }
+    .geo-legend-title { font-weight: 700; font-size: 13px; border-bottom: 1px solid rgba(0,0,0,0.08); padding-bottom: 8px; margin-bottom: 6px; }
+    .geo-legend-sub { color: #777; font-size: 12px; padding-top: 6px; }
+    .geo-legend-dot {
+      width: 12px; height: 12px; border-radius: 50%;
+      background: #3b6bd6; display: inline-block; flex-shrink: 0;
+    }
+    .geo-legend-gradient {
+      margin-top: 8px; height: 10px; border-radius: 5px;
+      background: linear-gradient(90deg, #1d4fd6 0%, #3fa9f5 20%, #35d488 45%, #ffe14d 70%, #ff6b35 88%, #e02424 100%);
+    }
+    .geo-legend-scale {
+      display: flex; justify-content: space-between; font-size: 10px;
+      color: #888; margin-top: 4px; text-transform: uppercase; letter-spacing: 0.04em;
+    }
 
     /* ── Section title ── */
     .section-page-title { font-size: 22px; font-weight: 700; color: var(--text-primary,#e0e0ff); margin: 0 0 6px; }
     .section-page-sub   { font-size: 14px; color: var(--text-muted,#8b8ba7); margin: 0 0 24px; }
+
+    /* ── Settings Modals (Profile / Preferences) ── */
+    .settings-modal-overlay {
+      position: fixed; inset: 0; background: rgba(10,10,20,0.65);
+      z-index: 10000; display: flex; align-items: center; justify-content: center;
+      animation: settingsFadeIn 0.15s ease;
+    }
+    .settings-modal {
+      background: #1a1a2e; border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 16px; padding: 28px; width: 420px; max-width: 90vw;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+      font-family: 'Space Grotesk', sans-serif; color: #e0e0ff;
+    }
+    .settings-modal h3 { margin: 0 0 6px; font-size: 18px; display: flex; align-items: center; }
+    .settings-modal .settings-sub { font-size: 13px; color: #8b8ba7; margin: 0 0 20px; }
+    .settings-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+    .settings-field label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #8b8ba7; }
+    .settings-field input, .settings-field select {
+      background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 10px; padding: 10px 14px; color: #e0e0ff;
+      font-family: 'Space Grotesk', sans-serif; font-size: 14px; outline: none;
+    }
+    .settings-field input:focus, .settings-field select:focus { border-color: rgba(108,99,255,0.6); }
+    .settings-field select option { background: #1a1a2e; }
+    .settings-toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.05); gap: 12px; }
+    .settings-toggle-row:last-of-type { border-bottom: none; }
+    .settings-toggle-label { font-size: 13px; color: #e0e0ff; }
+    .settings-toggle-sub { font-size: 11px; color: #8b8ba7; }
+    .settings-switch { position: relative; width: 40px; height: 22px; flex-shrink: 0; display: inline-block; }
+    .settings-switch input { opacity: 0; width: 0; height: 0; }
+    .settings-switch .slider {
+      position: absolute; inset: 0; background: rgba(255,255,255,0.15); border-radius: 22px; cursor: pointer; transition: 0.2s;
+    }
+    .settings-switch .slider::before {
+      content: ""; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px;
+      background: #fff; border-radius: 50%; transition: 0.2s;
+    }
+    .settings-switch input:checked + .slider { background: linear-gradient(135deg,#6c63ff,#00e5ff); }
+    .settings-switch input:checked + .slider::before { transform: translateX(18px); }
+    .settings-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+    .settings-btn-cancel {
+      background: transparent; border: 1px solid rgba(255,255,255,0.15); color: #e0e0ff;
+      border-radius: 10px; padding: 10px 20px; font-family: 'Space Grotesk', sans-serif; font-size: 13px; cursor: pointer;
+    }
+    .settings-btn-save {
+      background: linear-gradient(135deg,#6c63ff,#00e5ff); border: none; color: #fff;
+      border-radius: 10px; padding: 10px 20px; font-family: 'Space Grotesk', sans-serif; font-size: 13px; font-weight: 600; cursor: pointer;
+    }
+    @keyframes settingsFadeIn { from { opacity: 0; } to { opacity: 1; } }
   </style>
 </head>
 <body class="dash-body">
@@ -166,8 +253,8 @@
         <div class="loc-status" id="locStatus"></div>
       </div>
       <div class="topbar-actions">
-        <div class="icon-btn"><i class="fas fa-bell"></i><div class="notif-dot"></div></div>
-        <div class="icon-btn"><i class="fas fa-cog"></i></div>
+        <div class="icon-btn" id="notifBtn" title="Notifications"><i class="fas fa-bell"></i><div class="notif-dot" id="notifDot"></div></div>
+        <div class="icon-btn" id="settingsBtn" title="Settings"><i class="fas fa-cog"></i></div>
       </div>
     </div>
 
@@ -299,15 +386,6 @@
           </div>
         </div>
 
-        <!-- Geo Map -->
-        <div class="map-card">
-          <div class="chart-header" style="margin-bottom:16px">
-            <div><div class="chart-title section-title"><i class="fas fa-map-marked-alt"></i> Geographic Heatmap</div><div class="chart-sub">Job density across US &amp; UK cities</div></div>
-            <span class="chart-badge live">Geo</span>
-          </div>
-          <div id="geoMap" style="height:320px; border-radius:10px;"></div>
-        </div>
-
         <!-- Top Skills -->
         <div class="chart-card" style="margin-bottom:28px">
           <div class="chart-header">
@@ -325,7 +403,7 @@
       ══════════════════════════════════════ -->
       <div class="page-section" id="section-explore">
         <p class="section-page-title"><i class="fas fa-search" style="color:var(--accent)"></i> Explore Jobs</p>
-        <p class="section-page-sub">Browse all 600 sampled real Adzuna postings. Filter by category, contract type, or keyword.</p>
+        <p class="section-page-sub">Browse real Adzuna postings. Filter by category, contract type, or keyword.</p>
 
         <div class="explore-filters">
           <select id="exploreCatFilter">
@@ -349,7 +427,7 @@
           </select>
           <input type="text" id="exploreSearch" placeholder="Search by title or company…" style="flex:1; min-width:180px;"/>
         </div>
-        <div id="exploreCount" style="font-size:13px;color:var(--text-muted,#8b8ba7);margin-bottom:16px;"></div>
+        <div id="exploreCount"></div>
         <div class="results-grid" id="exploreGrid"></div>
       </div>
 
@@ -457,10 +535,35 @@
            SECTION: GEO HEATMAP
       ══════════════════════════════════════ -->
       <div class="page-section" id="section-geo">
-        <p class="section-page-title"><i class="fas fa-map-marked-alt" style="color:var(--accent)"></i> Geographic Heatmap</p>
-        <p class="section-page-sub">Job density visualised across US and UK cities using Leaflet.js heatmap layer.</p>
-        <div class="map-card">
-          <div id="geoMapFull" style="height:500px; border-radius:12px;"></div>
+        <p class="section-page-title"><i class="fas fa-map-marked-alt" style="color:var(--accent)"></i> Geographic Intelligence</p>
+        <p class="section-page-sub">Country-level hiring intake — bigger, darker circles mean more postings.</p>
+
+        <div class="chart-card map-card">
+          <div class="chart-header">
+            <div><div class="chart-title">Job Posting Intake by Country</div><div class="chart-sub">Bubble size &amp; colour · darker = more jobs</div></div>
+            <span class="chart-badge live">Live</span>
+          </div>
+          <div id="geoMapWrap" style="position:relative; width:100%; height:560px; border-radius:12px; overflow:hidden;">
+            <div id="geoMapContainer" style="width:100%; height:100%;"></div>
+
+            <div id="geoTitleCard">Job Postings — Country Intake</div>
+
+            <div id="geoLegendPanel">
+              <div class="geo-legend-row geo-legend-title">
+                <i class="fas fa-list-ul"></i> Legend
+              </div>
+              <div class="geo-legend-row">
+                <span class="geo-legend-dot"></span> Job Postings
+              </div>
+              <div class="geo-legend-row geo-legend-sub">
+                <i class="fas fa-caret-down"></i> Postings intake
+              </div>
+              <div class="geo-legend-gradient"></div>
+              <div class="geo-legend-scale">
+                <span>Low</span><span>Medium</span><span>High</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
