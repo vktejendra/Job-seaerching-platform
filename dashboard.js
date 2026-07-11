@@ -584,7 +584,8 @@ async function loadTrendsSection() {
   }
 }
 
-// ---- GEO INTELLIGENCE (Leaflet heatmap over real lat/lng job postings) ----
+// ---- GEO INTELLIGENCE (country-level hiring intake — darker & bigger
+// circle means more postings from that country) ----
 let geoMapFullInstance;
 
 async function loadGeoFullSection() {
@@ -604,10 +605,10 @@ async function loadGeoFullSection() {
 
     try {
 
-        const res = await fetch(`${API}/geo?limit=5000`);
+        const res = await fetch(`${API}/geo-city-intake`);
         const data = await res.json();
 
-        console.log("Geo Points:", data.length);
+        console.log("City Intake:", data);
 
         requestAnimationFrame(() => {
 
@@ -624,33 +625,41 @@ async function loadGeoFullSection() {
                 }
             ).addTo(geoMapFullInstance);
 
-            const heatData = data
-    .filter(item => item.latitude && item.longitude)
-    .map(item => [
-        item.latitude,
-        item.longitude,
-        Math.min((item.salary_max || 0) / 20000, 1) || 0.3
-    ]);
+            if (data.length) {
 
-console.log(heatData.slice(0,5));
+                const counts = data.map(d => d.count);
+                const min = Math.min(...counts);
+                const max = Math.max(...counts);
+                const scaleT = (count) => (max === min ? 1 : (count - min) / (max - min));
 
-            if (heatData.length) {
-              console.log(heatData.slice(0,10));
-L.heatLayer(heatData, {
-    radius: 35,
-    blur: 25,
-    maxZoom: 18,
-    minOpacity: 0.6,
-    gradient: {
-        0.10: "#0000ff",
-        0.35: "#00ffff",
-        0.55: "#00ff00",
-        0.75: "#ffff00",
-        1.00: "#ff0000"
-    }
-}).addTo(geoMapFullInstance);
+                // Light -> dark shade of the same hue as intake increases.
+                const colorFor = (count) => {
+                    const t = scaleT(count);
+                    const light = [255, 179, 179];
+                    const dark  = [139, 0, 0];
+                    const rgb = light.map((c, i) => Math.round(c + (dark[i] - c) * t));
+                    return `rgb(${rgb.join(",")})`;
+                };
 
-              geoMapFullInstance.setView([39, -98], 4);
+                const radiusFor = (count) => 8 + scaleT(count) * 26; // 8px..34px
+
+                data.forEach(d => {
+                    const marker = L.circleMarker([d.lat, d.lon], {
+                        radius: radiusFor(d.count),
+                        color: "rgba(255,255,255,0.4)",
+                        weight: 1,
+                        fillColor: colorFor(d.count),
+                        fillOpacity: 0.8
+                    }).addTo(geoMapFullInstance);
+
+                    marker.bindTooltip(
+                        `<strong>${d.city}</strong><br/>${d.count.toLocaleString()} postings`,
+                        { direction: "top", sticky: true }
+                    );
+                });
+
+                const bounds = L.latLngBounds(data.map(d => [d.lat, d.lon]));
+                geoMapFullInstance.fitBounds(bounds, { padding: [60, 60] });
 
             } else {
 
