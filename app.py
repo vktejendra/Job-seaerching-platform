@@ -241,6 +241,93 @@ def geo_summary():
 
 
 # ─────────────────────────────────────────
+# GEO — COUNTRY INTAKE (for the map's colour-graded country bubbles)
+# ─────────────────────────────────────────
+_COUNTRY_META = {
+    "US": {"name": "United States", "lat": 39.8, "lon": -98.6},
+    "UK": {"name": "United Kingdom", "lat": 54.0, "lon": -2.5},
+}
+
+def _parse_country(area) -> str:
+    """location_area is stored as a *stringified* Python list, e.g.
+    "['US', 'Virginia', 'Fairfax County', 'Herndon']" — this pulls out
+    just the first element (the country) instead of treating the whole
+    string as one opaque value."""
+    if not area or str(area) in ("nan", ""):
+        return "Unknown"
+    s = str(area).strip()
+    try:
+        if s.startswith("["):
+            import ast
+            parts = ast.literal_eval(s)
+            return str(parts[0]).strip() if parts else "Unknown"
+    except Exception:
+        pass
+    return s.split("›")[0].strip() if s else "Unknown"
+
+
+@app.route("/api/geo-country-intake")
+def geo_country_intake():
+    df = get_df()
+    counts = df["location_area"].apply(_parse_country).value_counts()
+
+    results = []
+    for code, count in counts.items():
+        meta = _COUNTRY_META.get(code)
+        if not meta:
+            continue  # skip anything without known coordinates
+        results.append({
+            "code": code,
+            "country": meta["name"],
+            "lat": meta["lat"],
+            "lon": meta["lon"],
+            "count": int(count)
+        })
+
+    results.sort(key=lambda x: x["count"], reverse=True)
+    return jsonify(results)
+
+
+@app.route("/api/geo-city-intake")
+def geo_city_intake():
+    """Sample of real cities (not the whole dataset) for the map: top 30
+    US cities + top 15 UK cities by posting count, with their average
+    lat/lon."""
+    df = get_df().copy()
+    df["_country"] = df["location_area"].apply(_parse_country)
+
+    valid = df[
+        df["latitude"].notna() & df["longitude"].notna() &
+        (df["location_display"] != "") &
+        df["_country"].isin(["US", "UK"])
+    ]
+
+    grouped = (
+        valid.groupby(["location_display", "_country"])
+        .agg(count=("job_id", "size"), lat=("latitude", "mean"), lon=("longitude", "mean"))
+        .reset_index()
+    )
+
+    us_cities = grouped[grouped["_country"] == "US"].sort_values("count", ascending=False).head(30)
+    uk_cities = grouped[grouped["_country"] == "UK"].sort_values("count", ascending=False).head(15)
+    combined = pd.concat([us_cities, uk_cities])
+
+    results = [
+        {
+            "city": row["location_display"],
+            "country": _COUNTRY_META[row["_country"]]["name"],
+            "code": row["_country"],
+            "lat": round(float(row["lat"]), 4),
+            "lon": round(float(row["lon"]), 4),
+            "count": int(row["count"])
+        }
+        for _, row in combined.iterrows()
+    ]
+    results.sort(key=lambda x: x["count"], reverse=True)
+    return jsonify(results)
+
+
+# ─────────────────────────────────────────
 # GEO DATA (Heatmap Points)
 # ─────────────────────────────────────────
 @app.route("/api/geo")
