@@ -536,17 +536,17 @@
       ══════════════════════════════════════ -->
       <div class="page-section" id="section-geo">
         <p class="section-page-title"><i class="fas fa-map-marked-alt" style="color:var(--accent)"></i> Geographic Intelligence</p>
-        <p class="section-page-sub">Live heatmap of job posting density — brighter areas mean more postings.</p>
+        <p class="section-page-sub">Country-level hiring intake — bigger, darker circles mean more postings.</p>
 
         <div class="chart-card map-card">
           <div class="chart-header">
-            <div><div class="chart-title">Job Posting Heatmap</div><div class="chart-sub">Density by location · brighter = more jobs</div></div>
+            <div><div class="chart-title">Job Posting Intake by Country</div><div class="chart-sub">Bubble size &amp; colour · darker = more jobs</div></div>
             <span class="chart-badge live">Live</span>
           </div>
           <div id="geoMapWrap" style="position:relative; width:100%; height:560px; border-radius:12px; overflow:hidden;">
             <div id="geoMapContainer" style="width:100%; height:100%;"></div>
 
-            <div id="geoTitleCard">Job Postings — Density Map</div>
+            <div id="geoTitleCard">Job Postings — Country Intake</div>
 
             <div id="geoLegendPanel">
               <div class="geo-legend-row geo-legend-title">
@@ -556,7 +556,7 @@
                 <span class="geo-legend-dot"></span> Job Postings
               </div>
               <div class="geo-legend-row geo-legend-sub">
-                <i class="fas fa-caret-down"></i> Point density
+                <i class="fas fa-caret-down"></i> Postings intake
               </div>
               <div class="geo-legend-gradient"></div>
               <div class="geo-legend-scale">
