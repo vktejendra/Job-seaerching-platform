@@ -529,59 +529,11 @@ function updateChartsForSearch(jobs) {
   charts.salary.update();
 }
 
-// ---- GEO MAP (Leaflet) ----
-let geoMap;
-
-function initGeoMap() {
-
-    geoMap = L.map('geoMap')
-        .setView([20,0],2);
-
-    L.tileLayer(
-      'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-      {
-          attribution:'© CARTO'
-      }
-    ).addTo(geoMap);
-
-    loadGeoData();
-}
-
-async function loadGeoData() {
-
-    const res = await fetch(`${API}/geo`);
-    const data = await res.json();
-
-console.log("Geo Data:", data);
-console.log("Geo Count:", data.length);
-
-    const heatData =
-        data.map(item => [
-
-            item.latitude,
-            item.longitude,
-            0.7
-
-        ]);
-
-    if(typeof L.heatLayer !== "undefined"){
-
-        L.heatLayer(
-            heatData,
-            {
-                radius:35,
-                blur:25
-            }
-        ).addTo(geoMap);
-
-    }
-}
-
 // ---- ANALYTICS SECTIONS (Trends / Geo / Forecast) ----
-// These three pages each have their own canvases/map div that were
-// never wired up to any data. Track load-state per section so we only
-// build each Chart.js instance / Leaflet map once (re-creating a Chart
-// on a canvas that already has one throws "Canvas is already in use").
+// These three pages each have their own canvases/map div. Track load-state
+// per section so we only build each Chart.js instance / Leaflet map once
+// (re-creating a Chart on a canvas that already has one throws
+// "Canvas is already in use").
 const sectionsLoaded = { trends: false, geo: false, forecast: false };
 
 async function loadTrendsSection() {
@@ -632,39 +584,95 @@ async function loadTrendsSection() {
   }
 }
 
+// ---- GEO INTELLIGENCE (Leaflet heatmap over real lat/lng job postings) ----
 let geoMapFullInstance;
+
 async function loadGeoFullSection() {
-  if (sectionsLoaded.geo) {
-    // Map already exists but container may have been hidden (display:none)
-    // when it was first drawn, so its dimensions were wrong. Fix that now.
-    setTimeout(() => geoMapFullInstance && geoMapFullInstance.invalidateSize(), 200);
-    return;
-  }
-  sectionsLoaded.geo = true;
 
-  try {
-    geoMapFullInstance = L.map('geoMapFull').setView([20, 0], 2);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '© CARTO'
-    }).addTo(geoMapFullInstance);
+    if (sectionsLoaded.geo) {
 
-    const res = await fetch(`${API}/geo?limit=5000`);
-    const data = await res.json();
+        setTimeout(() => {
+            if (geoMapFullInstance) {
+                geoMapFullInstance.invalidateSize();
+            }
+        }, 200);
 
-    const heatData = data
-      .filter(item => item.latitude && item.longitude)
-      .map(item => [item.latitude, item.longitude, 0.7]);
-
-    if (typeof L.heatLayer !== 'undefined') {
-      L.heatLayer(heatData, { radius: 35, blur: 25 }).addTo(geoMapFullInstance);
+        return;
     }
 
-    setTimeout(() => geoMapFullInstance.invalidateSize(), 200);
-  } catch (err) {
-    console.error('Geo section load failed:', err);
-  }
-}
+    sectionsLoaded.geo = true;
 
+    try {
+
+        const res = await fetch(`${API}/geo?limit=5000`);
+        const data = await res.json();
+
+        console.log("Geo Points:", data.length);
+
+        requestAnimationFrame(() => {
+
+            geoMapFullInstance = L.map("geoMapContainer", {
+                worldCopyJump: true,
+                zoomControl: true
+            });
+
+            L.tileLayer(
+                "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+                {
+                    attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
+                    maxZoom: 18
+                }
+            ).addTo(geoMapFullInstance);
+
+            const heatData = data
+    .filter(item => item.latitude && item.longitude)
+    .map(item => [
+        item.latitude,
+        item.longitude,
+        Math.min((item.salary_max || 0) / 20000, 1) || 0.3
+    ]);
+
+console.log(heatData.slice(0,5));
+
+            if (heatData.length) {
+              console.log(heatData.slice(0,10));
+L.heatLayer(heatData, {
+    radius: 35,
+    blur: 25,
+    maxZoom: 18,
+    minOpacity: 0.6,
+    gradient: {
+        0.10: "#0000ff",
+        0.35: "#00ffff",
+        0.55: "#00ff00",
+        0.75: "#ffff00",
+        1.00: "#ff0000"
+    }
+}).addTo(geoMapFullInstance);
+
+              geoMapFullInstance.setView([39, -98], 4);
+
+            } else {
+
+                geoMapFullInstance.setView([20, 0], 2);
+
+            }
+
+            setTimeout(() => {
+
+                geoMapFullInstance.invalidateSize();
+
+            }, 300);
+
+        });
+
+    } catch (err) {
+
+        console.error("Geo section load failed:", err);
+
+    }
+
+}
 async function loadForecastSection() {
   if (sectionsLoaded.forecast) return;
   sectionsLoaded.forecast = true;
@@ -747,12 +755,29 @@ async function loadForecastSection() {
     console.error('Forecast section load failed:', err);
   }
 }
+
+// ---- EXPLORE JOBS ----
+let exploreSearchDebounce;
+
 async function loadExploreJobs(){
+
+    const category     = document.getElementById("exploreCatFilter")?.value || "";
+    const contractTime = document.getElementById("exploreCtFilter")?.value  || "";
+    const keyword      = document.getElementById("exploreSearch")?.value    || "";
 
     try{
 
+        const params = new URLSearchParams();
+        if (category)     params.set("category", category);
+        if (contractTime) params.set("contract_time", contractTime);
+        if (keyword)       params.set("role", keyword);
+
         const response =
-            await fetch(`${API}/search`);
+            await fetch(`${API}/search?${params.toString()}`);
+
+        if (!response.ok) {
+            throw new Error(`Search request failed (${response.status})`);
+        }
 
         const data =
             await response.json();
@@ -763,9 +788,18 @@ async function loadExploreJobs(){
         document.getElementById("exploreCount").innerHTML =
             `${data.count} Jobs`;
 
-        grid.innerHTML =
-            data.jobs.map(job=>`
+        if (!data.jobs.length) {
+            grid.innerHTML = "<p>No jobs match those filters.</p>";
+            return;
+        }
 
+        grid.innerHTML =
+            data.jobs.map(job=>{
+
+                const minS = job.salary_min != null ? `$${Math.round(job.salary_min).toLocaleString()}` : "N/A";
+                const maxS = job.salary_max != null ? `$${Math.round(job.salary_max).toLocaleString()}` : "N/A";
+
+                return `
             <div class="job-card">
 
                 <h3>${job.title}</h3>
@@ -774,15 +808,7 @@ async function loadExploreJobs(){
 
                 <p>${job.location_display}</p>
 
-                <p>
-
-                $${Math.round(job.salary_min)}
-
-                -
-
-                $${Math.round(job.salary_max)}
-
-                </p>
+                <p>${minS} - ${maxS}</p>
 
                 <a href="${job.redirect_url}" target="_blank">
 
@@ -792,16 +818,34 @@ async function loadExploreJobs(){
 
             </div>
 
-            `).join("");
+            `;
+            }).join("");
 
     }
 
     catch(err){
 
         console.error(err);
+        const grid = document.getElementById("exploreGrid");
+        if (grid) grid.innerHTML = "<p>Couldn't load jobs — is the backend running?</p>";
 
     }
 
+}
+
+function debouncedExploreSearch() {
+  clearTimeout(exploreSearchDebounce);
+  exploreSearchDebounce = setTimeout(loadExploreJobs, 350);
+}
+
+function initExploreFilters() {
+  const catFilter = document.getElementById("exploreCatFilter");
+  const ctFilter  = document.getElementById("exploreCtFilter");
+  const searchBox = document.getElementById("exploreSearch");
+
+  if (catFilter) catFilter.addEventListener("change", loadExploreJobs);
+  if (ctFilter)  ctFilter.addEventListener("change", loadExploreJobs);
+  if (searchBox) searchBox.addEventListener("input", debouncedExploreSearch);
 }
 
 // ---- SPINNER ----
@@ -811,6 +855,233 @@ function showSpinner(text) {
 }
 function hideSpinner() {
   document.getElementById('spinnerOverlay').classList.remove('show');
+}
+
+// ---- TOPBAR ICONS (notifications / settings) ----
+// Purely functional wiring — the icons themselves are untouched visually.
+function initTopbarIcons() {
+  const bellBtn = document.getElementById('notifBtn');
+  const settingsBtn = document.getElementById('settingsBtn');
+
+  if (bellBtn) {
+    bellBtn.addEventListener('click', () => {
+      const dot = document.getElementById('notifDot');
+      if (dot) dot.style.display = 'none';
+      showTopbarToast("You're all caught up — no new notifications.");
+    });
+  }
+
+  if (settingsBtn) {
+    settingsBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleSettingsMenu();
+    });
+  }
+}
+
+function showTopbarToast(msg) {
+  let toast = document.getElementById('topbarToast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'topbarToast';
+    toast.style.cssText = `
+      position: fixed; top: 70px; right: 24px; z-index: 9999;
+      background: #1a1a2e; color: #e0e0ff; border: 1px solid rgba(108,99,255,0.4);
+      border-radius: 10px; padding: 12px 18px; font-family: 'Space Grotesk', sans-serif;
+      font-size: 13px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); opacity: 0;
+      transition: opacity 0.25s; pointer-events: none;
+    `;
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  requestAnimationFrame(() => { toast.style.opacity = '1'; });
+  clearTimeout(toast._hideTimer);
+  toast._hideTimer = setTimeout(() => { toast.style.opacity = '0'; }, 2600);
+}
+
+function toggleSettingsMenu() {
+  const existing = document.getElementById('settingsMenu');
+  if (existing) { existing.remove(); return; }
+
+  const menu = document.createElement('div');
+  menu.id = 'settingsMenu';
+  menu.style.cssText = `
+    position: fixed; top: 60px; right: 24px; z-index: 9999;
+    background: #1a1a2e; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px;
+    padding: 8px; min-width: 190px; box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    font-family: 'Space Grotesk', sans-serif;
+  `;
+
+  const items = [
+    { icon: 'fa-user', label: 'Profile', action: openProfileModal },
+    { icon: 'fa-sliders-h', label: 'Preferences', action: openPreferencesModal },
+    { icon: 'fa-sign-out-alt', label: 'Sign Out', action: logout, danger: true }
+  ];
+
+  items.forEach(item => {
+    const row = document.createElement('div');
+    row.style.cssText = `
+      padding: 10px 14px; font-size: 13px; cursor: pointer; border-radius: 8px;
+      color: ${item.danger ? '#ff6b6b' : '#e0e0ff'};
+    `;
+    row.innerHTML = `<i class="fas ${item.icon}" style="width:18px;"></i> ${item.label}`;
+    row.addEventListener('mouseover', () => { row.style.background = item.danger ? 'rgba(255,107,107,0.12)' : 'rgba(108,99,255,0.15)'; });
+    row.addEventListener('mouseout',  () => { row.style.background = 'transparent'; });
+    row.addEventListener('click', () => { item.action(); menu.remove(); });
+    menu.appendChild(row);
+  });
+
+  document.body.appendChild(menu);
+
+  setTimeout(() => {
+    document.addEventListener('click', function closeMenu(e) {
+      if (!menu.contains(e.target)) {
+        menu.remove();
+        document.removeEventListener('click', closeMenu);
+      }
+    });
+  }, 0);
+}
+
+function closeAnySettingsModal() {
+  const existing = document.getElementById('settingsModalOverlay');
+  if (existing) existing.remove();
+}
+
+function getPreferences() {
+  return JSON.parse(localStorage.getItem('joblens_preferences') || '{}');
+}
+
+function openProfileModal() {
+  closeAnySettingsModal();
+  const sess = JSON.parse(localStorage.getItem('joblens_session') || 'null') || {};
+
+  const esc = v => (v || '').replace(/"/g, '&quot;');
+
+  const overlay = document.createElement('div');
+  overlay.id = 'settingsModalOverlay';
+  overlay.className = 'settings-modal-overlay';
+  overlay.innerHTML = `
+    <div class="settings-modal">
+      <h3><i class="fas fa-user" style="color:#6c63ff;margin-right:8px;"></i>Profile Details</h3>
+      <p class="settings-sub">Update how your name and role appear across JobLens.</p>
+
+      <div class="settings-field">
+        <label>Full Name</label>
+        <input type="text" id="profileNameInput" value="${esc(sess.name)}" placeholder="Your name"/>
+      </div>
+      <div class="settings-field">
+        <label>Role / Title</label>
+        <input type="text" id="profileRoleInput" value="${esc(sess.role)}" placeholder="e.g. Data Scientist"/>
+      </div>
+      <div class="settings-field">
+        <label>Email (optional)</label>
+        <input type="email" id="profileEmailInput" value="${esc(sess.email)}" placeholder="you@example.com"/>
+      </div>
+
+      <div class="settings-actions">
+        <button class="settings-btn-cancel" id="profileCancelBtn">Cancel</button>
+        <button class="settings-btn-save" id="profileSaveBtn">Save Changes</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeAnySettingsModal(); });
+  document.getElementById('profileCancelBtn').addEventListener('click', closeAnySettingsModal);
+
+  document.getElementById('profileSaveBtn').addEventListener('click', () => {
+    const name  = document.getElementById('profileNameInput').value.trim()  || 'User';
+    const role  = document.getElementById('profileRoleInput').value.trim() || 'Analyst';
+    const email = document.getElementById('profileEmailInput').value.trim();
+
+    const updated = { ...sess, name, role, email };
+    localStorage.setItem('joblens_session', JSON.stringify(updated));
+
+    document.getElementById('sidebarName').textContent   = name;
+    document.getElementById('sidebarRole').textContent   = role;
+    document.getElementById('sidebarAvatar').textContent = name[0].toUpperCase();
+
+    closeAnySettingsModal();
+    showTopbarToast('Profile updated.');
+  });
+}
+
+function openPreferencesModal() {
+  closeAnySettingsModal();
+  const prefs = getPreferences();
+  const esc = v => (v || '').replace(/"/g, '&quot;');
+
+  const overlay = document.createElement('div');
+  overlay.id = 'settingsModalOverlay';
+  overlay.className = 'settings-modal-overlay';
+  overlay.innerHTML = `
+    <div class="settings-modal">
+      <h3><i class="fas fa-sliders-h" style="color:#00e5ff;margin-right:8px;"></i>Preferences</h3>
+      <p class="settings-sub">Personalise your default search and notification behaviour.</p>
+
+      <div class="settings-field">
+        <label>Default Search Location</label>
+        <input type="text" id="prefDefaultLocation" value="${esc(prefs.defaultLocation)}" placeholder="e.g. London"/>
+      </div>
+
+      <div class="settings-field">
+        <label>Salary Display Currency</label>
+        <select id="prefCurrency">
+          <option value="USD" ${prefs.currency === 'USD' ? 'selected' : ''}>USD ($)</option>
+          <option value="GBP" ${prefs.currency !== 'USD' ? 'selected' : ''}>GBP (£)</option>
+        </select>
+      </div>
+
+      <div class="settings-toggle-row">
+        <div>
+          <div class="settings-toggle-label">Email Notifications</div>
+          <div class="settings-toggle-sub">Get notified about new matching postings</div>
+        </div>
+        <label class="settings-switch">
+          <input type="checkbox" id="prefNotifications" ${prefs.notifications ? 'checked' : ''}/>
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="settings-toggle-row">
+        <div>
+          <div class="settings-toggle-label">Compact Job Cards</div>
+          <div class="settings-toggle-sub">Show more results per row</div>
+        </div>
+        <label class="settings-switch">
+          <input type="checkbox" id="prefCompact" ${prefs.compact ? 'checked' : ''}/>
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="settings-actions">
+        <button class="settings-btn-cancel" id="prefsCancelBtn">Cancel</button>
+        <button class="settings-btn-save" id="prefsSaveBtn">Save Preferences</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeAnySettingsModal(); });
+  document.getElementById('prefsCancelBtn').addEventListener('click', closeAnySettingsModal);
+
+  document.getElementById('prefsSaveBtn').addEventListener('click', () => {
+    const updated = {
+      defaultLocation: document.getElementById('prefDefaultLocation').value.trim(),
+      currency: document.getElementById('prefCurrency').value,
+      notifications: document.getElementById('prefNotifications').checked,
+      compact: document.getElementById('prefCompact').checked,
+    };
+    localStorage.setItem('joblens_preferences', JSON.stringify(updated));
+
+    if (updated.defaultLocation && !document.getElementById('searchLocation').value) {
+      document.getElementById('searchLocation').value = updated.defaultLocation;
+    }
+
+    closeAnySettingsModal();
+    showTopbarToast('Preferences saved.');
+  });
 }
 
 // ---- SIDEBAR NAV ----
@@ -848,7 +1119,7 @@ function showSection(name, element) {
         classify: 'Job Category Classifier'
     })[name] || '';
 
-    
+
 if (name === "explore") {
 
     loadExploreJobs();
@@ -896,6 +1167,18 @@ async function predictSalary() {
 
         const data = await response.json();
 
+        if (data.error) {
+            alert("Salary prediction failed: " + data.error);
+            return;
+        }
+
+        // Guard against null/NaN salary values (e.g. no close matches found
+        // for this title/location/category combo) so we show "N/A" instead
+        // of a broken "$NaN" string.
+        const fmt = v => (v === null || v === undefined || isNaN(v))
+            ? "N/A"
+            : `$${Math.round(v).toLocaleString()}`;
+
         const result = document.getElementById("salaryResult");
 
         result.style.display = "block";
@@ -911,23 +1194,17 @@ async function predictSalary() {
 
                 <div class="salary-band">
                     <div class="band-label">Minimum</div>
-                    <div class="band-value green">
-                        $${Math.round(data.salary_min).toLocaleString()}
-                    </div>
+                    <div class="band-value green">${fmt(data.salary_min)}</div>
                 </div>
 
                 <div class="salary-band highlight">
                     <div class="band-label">Average</div>
-                    <div class="band-value large">
-                        $${Math.round(data.salary_mid).toLocaleString()}
-                    </div>
+                    <div class="band-value large">${fmt(data.salary_mid)}</div>
                 </div>
 
                 <div class="salary-band">
                     <div class="band-label">Maximum</div>
-                    <div class="band-value cyan">
-                        $${Math.round(data.salary_max).toLocaleString()}
-                    </div>
+                    <div class="band-value cyan">${fmt(data.salary_max)}</div>
                 </div>
 
             </div>
@@ -984,10 +1261,27 @@ async function classifyJob() {
 
         const data = await response.json();
 
+        if (data.error) {
+            alert("Classification failed: " + data.error);
+            return;
+        }
+
         const result =
             document.getElementById("classifyResult");
 
         result.style.display = "block";
+
+        const barColors = ["#00e5ff", "#6c63ff", "#ff6b6b"];
+
+        const top3Html = (data.top3 || []).map((row, i) => `
+            <div class="classify-row">
+                <div class="classify-label">${row.category}</div>
+                <div class="classify-bar-wrap">
+                    <div class="classify-bar" style="width:${Math.round(row.probability * 100)}%; background:${barColors[i] || '#8b8ba7'};"></div>
+                </div>
+                <div class="classify-prob">${Math.round(row.probability * 100)}%</div>
+            </div>
+        `).join("");
 
         result.innerHTML = `
 
@@ -999,6 +1293,10 @@ async function classifyJob() {
 
                 <strong>${data.category}</strong>
 
+            </div>
+
+            <div class="classify-top3">
+                ${top3Html}
             </div>
 
         </div>
@@ -1065,6 +1363,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       .classList.add("active-section");
 
     initCharts();
+    initTopbarIcons();
+    initExploreFilters();
 
     try {
         await loadCategoryChart();
@@ -1079,5 +1379,4 @@ document.addEventListener("DOMContentLoaded", async () => {
         );
     }
 
-    setTimeout(initGeoMap, 300);
 });
