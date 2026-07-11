@@ -14,10 +14,16 @@ numpy==2.4.6
 # Machine Learning
 scikit-learn==1.9.0
 scipy==1.17.1
-xgboost==2.1.1          # optional: stronger salary model
+# xgboost removed: model_training.py never actually imports/uses it (only
+# sklearn's GradientBoostingRegressor/RandomForestClassifier are used), and
+# the old 2.1.1 pin predates Python 3.14 -- pip would try to compile it from
+# source on Render, which is almost certainly what was breaking the build.
 
 # NLP
-spacy==3.8.12
+spacy==3.8.14
+# 3.8.12 was yanked from PyPI (a maintainer-flagged bug, packages built
+# against it can fail to load models correctly) -- 3.8.14 is the latest
+# stable release and adds full Python 3.14 support.
 # After install run: python -m spacy download en_core_web_sm
 
 # Visualisation
