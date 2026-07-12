@@ -60,7 +60,14 @@ def _validate_columns(df: pd.DataFrame) -> pd.DataFrame:
         log.warning(f"Missing columns (will fill with NaN): {missing}")
         for c in missing:
             df[c] = np.nan
-    return df[EXPECTED_COLS]
+    # .copy() matters here: without it, this returns a *view* into the
+    # original DataFrame. Every later df[col] = ... assignment throughout
+    # this whole pipeline (_clean_text_fields, _clean_salary, etc.) would
+    # then be an ambiguous chained assignment under pandas' Copy-on-Write
+    # semantics — pandas warns about exactly this ("ChainedAssignmentError:
+    # behaviour will change in pandas 3.0!"). Copying once here, right at
+    # the source, means every downstream assignment is unambiguously safe.
+    return df[EXPECTED_COLS].copy()
 
 
 # ─────────────────────────────────────────

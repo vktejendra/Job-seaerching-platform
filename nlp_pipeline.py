@@ -7,7 +7,7 @@ Skill extraction from job descriptions using:
 Run standalone: python nlp_pipeline.py <csv_path>
 """
 
-import re, logging
+import os, re, logging
 from collections import Counter
 from typing import List, Dict
 
@@ -101,20 +101,32 @@ def extract_skills(text: str) -> List[str]:
                 seen.add(skill_canonical)
 
     # Pass 2 — spaCy NER if available (noun chunks as candidate skills)
-    try:
-        import spacy
-        _nlp = _get_spacy_model()
-        if _nlp:
-            doc = _nlp(text[:3000])   # limit for speed
-            for chunk in doc.noun_chunks:
-                chunk_text = chunk.text.strip()
-                if 2 <= len(chunk_text) <= 40 and chunk_text[0].isupper():
-                    canonical = _SKILL_LOWER.get(chunk_text.lower())
-                    if canonical and canonical not in seen:
-                        found.append(canonical)
-                        seen.add(canonical)
-    except Exception:
-        pass  # spaCy not installed or model missing — fall through
+    # Disabled by default: thinc 8.3.13's compiled maxout op is known to
+    # segfault against numpy 2.4.6 on real-world text (this is what was
+    # crashing `python nlp_pipeline.py` outright, with no catchable
+    # Python traceback — a segfault bypasses try/except entirely). This
+    # is almost certainly also the cause of the SIGSEGV worker deaths
+    # ("Worker was sent code 139") app.py's own comments warn about on
+    # Render, since /api/extract-skills and /api/top-skills both call
+    # this function on real description text. Pass 1 above (keyword
+    # taxonomy matching) is unaffected and is what the app actually
+    # relies on. Set JOBLENS_USE_SPACY_NER=1 only in an environment
+    # where you've confirmed numpy/thinc/blis are compatible.
+    if os.environ.get("JOBLENS_USE_SPACY_NER") == "1":
+        try:
+            import spacy
+            _nlp = _get_spacy_model()
+            if _nlp:
+                doc = _nlp(text[:3000])   # limit for speed
+                for chunk in doc.noun_chunks:
+                    chunk_text = chunk.text.strip()
+                    if 2 <= len(chunk_text) <= 40 and chunk_text[0].isupper():
+                        canonical = _SKILL_LOWER.get(chunk_text.lower())
+                        if canonical and canonical not in seen:
+                            found.append(canonical)
+                            seen.add(canonical)
+        except Exception:
+            pass  # spaCy not installed or model missing — fall through
 
     return found
 

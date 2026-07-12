@@ -4,7 +4,11 @@
 
 // --- Session Guard ---
 const session = JSON.parse(localStorage.getItem('joblens_session') || 'null');
-const API = "/api";
+const API =
+    window.location.hostname === "127.0.0.1" ||
+    window.location.hostname === "localhost"
+        ? "http://127.0.0.1:5000/api"
+        : "/api";
 if (!session) window.location.href = 'index.html';
 
 // Populate user info in sidebar

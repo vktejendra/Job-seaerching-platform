@@ -6,7 +6,21 @@ Saves trained models to /models directory.
 Run standalone to train:  python model_training.py <csv_path>
 """
 
-import os, pickle, logging
+import os
+
+# Must run BEFORE numpy/scipy/scikit-learn are imported (see the matching
+# comment in app.py). Without this, RandomForestClassifier(n_jobs=-1) plus
+# GradientBoostingRegressor's own BLAS calls can spawn far more threads
+# than the machine benefits from, causing heavy contention that makes the
+# process appear to hang indefinitely (or get silently killed by the OS)
+# instead of just training a bit slower.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+
+import pickle, logging, time
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestClassifier
@@ -40,41 +54,62 @@ GEO_MODEL_PATH = os.path.join(MODEL_DIR, "geo_model.pkl")
 # ─────────────────────────────────────────
 def train_salary_model(df: pd.DataFrame):
     log.info("Training salary prediction model...")
+    _t0 = time.time()
 
     # Filter rows with valid salary
     valid = df[df["salary_mid"].notna() & df["title"].notna()].copy()
+    log.info(f"[DEBUG] row filter done in {time.time()-_t0:.2f}s")
     log.info(f"Valid salary rows: {len(valid)}")
 
     # Encode categoricals
+    _t1 = time.time()
     le_cat  = LabelEncoder()
     le_ct   = LabelEncoder()
     le_ctype= LabelEncoder()
     le_loc  = LabelEncoder()
 
     valid["cat_enc"]    = le_cat.fit_transform(valid["category_label"].fillna("unknown"))
+    log.info(f"[DEBUG] le_cat done in {time.time()-_t1:.2f}s")
+    _t1 = time.time()
     valid["ct_enc"]     = le_ct.fit_transform(valid["contract_time"].fillna("unknown"))
+    log.info(f"[DEBUG] le_ct done in {time.time()-_t1:.2f}s")
+    _t1 = time.time()
     valid["ctype_enc"]  = le_ctype.fit_transform(valid["contract_type"].fillna("unknown"))
+    log.info(f"[DEBUG] le_ctype done in {time.time()-_t1:.2f}s")
+    _t1 = time.time()
     valid["loc_code"]   = le_loc.fit_transform(valid["country"].fillna("unknown"))
+    log.info(f"[DEBUG] le_loc done in {time.time()-_t1:.2f}s")
 
     # TF-IDF on title (captures role semantics)
+    _t1 = time.time()
     tfidf = TfidfVectorizer(max_features=500, stop_words="english", ngram_range=(1,2))
     title_feats = tfidf.fit_transform(valid["title"].fillna(""))
+    log.info(f"[DEBUG] tfidf fit_transform done in {time.time()-_t1:.2f}s, shape={title_feats.shape}")
 
     # Numeric features
+    _t1 = time.time()
     num_cols = ["cat_enc", "ct_enc", "ctype_enc", "loc_code",
                 "desc_length", "salary_is_predicted"]
     num_feats = valid[num_cols].fillna(0).values
+    log.info(f"[DEBUG] num_feats built in {time.time()-_t1:.2f}s, shape={num_feats.shape}")
 
+    _t1 = time.time()
     X = hstack([title_feats, num_feats])
     y = valid["salary_mid"].values
+    log.info(f"[DEBUG] hstack done in {time.time()-_t1:.2f}s, X shape={X.shape}")
 
+    _t1 = time.time()
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    log.info(f"[DEBUG] train_test_split done in {time.time()-_t1:.2f}s")
 
+    log.info("Fitting GradientBoostingRegressor (this is the slow step -- can take a couple of minutes)...")
     model = GradientBoostingRegressor(
         n_estimators=200, max_depth=5, learning_rate=0.08,
-        min_samples_split=10, subsample=0.8, random_state=42
+        min_samples_split=10, subsample=0.8, random_state=42,
+        verbose=1
     )
     model.fit(X_train, y_train)
+    log.info("GradientBoostingRegressor fit complete.")
 
     y_pred = model.predict(X_test)
     mae = mean_absolute_error(y_test, y_pred)
@@ -112,13 +147,19 @@ def train_category_classifier(df: pd.DataFrame):
     # Combine title + partial description for features
     text = (valid["title"].fillna("") + " " + valid["description"].fillna("").str[:300])
 
+    # n_jobs=1 (not -1): matches the OMP/OPENBLAS thread pinning above --
+    # letting RandomForest spawn one process per CPU core here was very
+    # likely what made this step hang/silently die on constrained or
+    # many-core machines.
     pipe = Pipeline([
         ("tfidf", TfidfVectorizer(max_features=2000, stop_words="english", ngram_range=(1,2))),
-        ("clf",   RandomForestClassifier(n_estimators=150, max_depth=20, random_state=42, n_jobs=-1))
+        ("clf",   RandomForestClassifier(n_estimators=150, max_depth=20, random_state=42, n_jobs=1))
     ])
 
     X_train, X_test, y_train, y_test = train_test_split(text, y, test_size=0.2, random_state=42)
+    log.info("Fitting RandomForestClassifier (this can also take a minute or two)...")
     pipe.fit(X_train, y_train)
+    log.info("RandomForestClassifier fit complete.")
 
     y_pred = pipe.predict(X_test)
     acc = accuracy_score(y_test, y_pred)

@@ -3,11 +3,28 @@ JobLens — Flask Backend API
 Endpoints: search, salary prediction, skill extraction, EDA stats, trends
 """
 
+import os
+
+# Must run BEFORE numpy/scipy/scikit-learn are imported anywhere in the
+# process (including transitively, via data_cleaning/model_training/
+# nlp_pipeline below) — these libraries read these env vars once at
+# import time to size their internal thread pools. On a small,
+# CPU-limited container (like a free-tier host), letting BLAS/OpenMP
+# spawn multiple threads is a well-known cause of the process segfaulting
+# — visible in logs as "Worker was sent code 139" (SIGSEGV). Pinning
+# everything to 1 thread avoids that entirely; it costs a little raw
+# speed but nothing here is CPU-bound enough for that to matter.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 import pandas as pd
 import numpy as np
-import pickle, os, json
+import pickle, json
 from datetime import datetime
 
 # Internal modules
@@ -59,6 +76,22 @@ def _clean_nans(record: dict) -> dict:
         if isinstance(v, float) and (np.isnan(v) or np.isinf(v)):
             record[k] = None
     return record
+
+
+# ─────────────────────────────────────────
+# Simple in-memory cache for endpoints that are deterministic given the
+# static CSV (only ever vary by an optional category filter, so the cache
+# stays small/bounded). These were being recomputed from scratch on every
+# single request — on a memory/CPU-limited free tier, that repeated work
+# on every dashboard load is a real crash risk. Caching them cuts that
+# work down to once per distinct filter value for the life of the process.
+# ─────────────────────────────────────────
+_endpoint_cache = {}
+
+def _cached(key, compute_fn):
+    if key not in _endpoint_cache:
+        _endpoint_cache[key] = compute_fn()
+    return _endpoint_cache[key]
 
 
 # ─────────────────────────────────────────
@@ -193,18 +226,20 @@ def classify_endpoint():
 # ─────────────────────────────────────────
 @app.route("/api/eda/stats")
 def eda_stats():
-    df = get_df()
-    return jsonify({
-        "total_postings": int(len(df)),
-        "unique_companies": int(df["company"].nunique()),
-        "unique_categories": int(df["category_label"].nunique()),
-        "avg_salary_min": float(df["salary_min"].mean()) if not np.isnan(df["salary_min"].mean()) else 0,
-        "avg_salary_max": float(df["salary_max"].mean()) if not np.isnan(df["salary_max"].mean()) else 0,
-        "contract_time_dist": df["contract_time"].value_counts().to_dict(),
-        "contract_type_dist": df["contract_type"].value_counts().to_dict(),
-        "top_categories": df["category_label"].value_counts().head(10).to_dict(),
-        "salary_predicted_pct": float(df["salary_is_predicted"].mean() * 100),
-    })
+    def compute():
+        df = get_df()
+        return {
+            "total_postings": int(len(df)),
+            "unique_companies": int(df["company"].nunique()),
+            "unique_categories": int(df["category_label"].nunique()),
+            "avg_salary_min": float(df["salary_min"].mean()) if not np.isnan(df["salary_min"].mean()) else 0,
+            "avg_salary_max": float(df["salary_max"].mean()) if not np.isnan(df["salary_max"].mean()) else 0,
+            "contract_time_dist": df["contract_time"].value_counts().to_dict(),
+            "contract_type_dist": df["contract_type"].value_counts().to_dict(),
+            "top_categories": df["category_label"].value_counts().head(10).to_dict(),
+            "salary_predicted_pct": float(df["salary_is_predicted"].mean() * 100),
+        }
+    return jsonify(_cached(("eda-stats",), compute))
 
 
 # ─────────────────────────────────────────
@@ -215,34 +250,35 @@ def eda_stats():
 # ─────────────────────────────────────────
 @app.route("/api/trends")
 def demand_trends():
-    df = get_df()
     cat = request.args.get("category", None)
 
-    tmp = df.copy()
+    def compute():
+        df = get_df()
+        tmp = df.copy()
 
-    tmp["month"] = pd.to_datetime(
-        tmp["created"],
-        errors="coerce"
-    ).dt.to_period("M").astype(str)
+        tmp["month"] = pd.to_datetime(
+            tmp["created"],
+            errors="coerce"
+        ).dt.to_period("M").astype(str)
 
-    if cat:
-        tmp = tmp[
-            tmp["category_label"].str.lower() == cat.lower()
-        ]
+        if cat:
+            tmp = tmp[
+                tmp["category_label"].str.lower() == cat.lower()
+            ]
 
-    trend = tmp.groupby("month").size().reset_index(name="count")
+        trend = tmp.groupby("month").size().reset_index(name="count")
 
-    # Fix NaN / Infinity JSON issues
-    trend = trend.replace(
-        [np.inf, -np.inf],
-        np.nan
-    )
+        # Fix NaN / Infinity JSON issues
+        trend = trend.replace(
+            [np.inf, -np.inf],
+            np.nan
+        )
 
-    trend = trend.fillna(0)
+        trend = trend.fillna(0)
 
-    return jsonify(
-        trend.to_dict(orient="records")
-    )
+        return trend.to_dict(orient="records")
+
+    return jsonify(_cached(("trends", cat), compute))
 # ─────────────────────────────────────────
 # GEO SUMMARY (chart-based breakdown by country/city)
 # ─────────────────────────────────────────
@@ -287,24 +323,27 @@ def _parse_country(area) -> str:
 
 @app.route("/api/geo-country-intake")
 def geo_country_intake():
-    df = get_df()
-    counts = df["location_area"].apply(_parse_country).value_counts()
+    def compute():
+        df = get_df()
+        counts = df["location_area"].apply(_parse_country).value_counts()
 
-    results = []
-    for code, count in counts.items():
-        meta = _COUNTRY_META.get(code)
-        if not meta:
-            continue  # skip anything without known coordinates
-        results.append({
-            "code": code,
-            "country": meta["name"],
-            "lat": meta["lat"],
-            "lon": meta["lon"],
-            "count": int(count)
-        })
+        results = []
+        for code, count in counts.items():
+            meta = _COUNTRY_META.get(code)
+            if not meta:
+                continue  # skip anything without known coordinates
+            results.append({
+                "code": code,
+                "country": meta["name"],
+                "lat": meta["lat"],
+                "lon": meta["lon"],
+                "count": int(count)
+            })
 
-    results.sort(key=lambda x: x["count"], reverse=True)
-    return jsonify(results)
+        results.sort(key=lambda x: x["count"], reverse=True)
+        return results
+
+    return jsonify(_cached(("geo-country-intake",), compute))
 
 
 @app.route("/api/geo-city-intake")
@@ -312,38 +351,41 @@ def geo_city_intake():
     """Sample of real cities (not the whole dataset) for the map: top 30
     US cities + top 15 UK cities by posting count, with their average
     lat/lon."""
-    df = get_df().copy()
-    df["_country"] = df["location_area"].apply(_parse_country)
+    def compute():
+        df = get_df().copy()
+        df["_country"] = df["location_area"].apply(_parse_country)
 
-    valid = df[
-        df["latitude"].notna() & df["longitude"].notna() &
-        (df["location_display"] != "") &
-        df["_country"].isin(["US", "UK"])
-    ]
+        valid = df[
+            df["latitude"].notna() & df["longitude"].notna() &
+            (df["location_display"] != "") &
+            df["_country"].isin(["US", "UK"])
+        ]
 
-    grouped = (
-        valid.groupby(["location_display", "_country"])
-        .agg(count=("job_id", "size"), lat=("latitude", "mean"), lon=("longitude", "mean"))
-        .reset_index()
-    )
+        grouped = (
+            valid.groupby(["location_display", "_country"])
+            .agg(count=("job_id", "size"), lat=("latitude", "mean"), lon=("longitude", "mean"))
+            .reset_index()
+        )
 
-    us_cities = grouped[grouped["_country"] == "US"].sort_values("count", ascending=False).head(30)
-    uk_cities = grouped[grouped["_country"] == "UK"].sort_values("count", ascending=False).head(15)
-    combined = pd.concat([us_cities, uk_cities])
+        us_cities = grouped[grouped["_country"] == "US"].sort_values("count", ascending=False).head(30)
+        uk_cities = grouped[grouped["_country"] == "UK"].sort_values("count", ascending=False).head(15)
+        combined = pd.concat([us_cities, uk_cities])
 
-    results = [
-        {
-            "city": row["location_display"],
-            "country": _COUNTRY_META[row["_country"]]["name"],
-            "code": row["_country"],
-            "lat": round(float(row["lat"]), 4),
-            "lon": round(float(row["lon"]), 4),
-            "count": int(row["count"])
-        }
-        for _, row in combined.iterrows()
-    ]
-    results.sort(key=lambda x: x["count"], reverse=True)
-    return jsonify(results)
+        results = [
+            {
+                "city": row["location_display"],
+                "country": _COUNTRY_META[row["_country"]]["name"],
+                "code": row["_country"],
+                "lat": round(float(row["lat"]), 4),
+                "lon": round(float(row["lon"]), 4),
+                "count": int(row["count"])
+            }
+            for _, row in combined.iterrows()
+        ]
+        results.sort(key=lambda x: x["count"], reverse=True)
+        return results
+
+    return jsonify(_cached(("geo-city-intake",), compute))
 
 
 # ─────────────────────────────────────────
@@ -400,19 +442,23 @@ def geo_data():
 # ─────────────────────────────────────────
 @app.route("/api/top-skills")
 def top_skills():
-    df  = get_df()
     cat = request.args.get("category", None)
-    tmp = df.copy()
-    if cat:
-        tmp = tmp[tmp["category_label"].str.lower() == cat.lower()]
-    # Use pre-computed NLP or re-extract
-    sample_texts = tmp["description"].dropna().sample(min(500, len(tmp))).tolist()
-    all_skills = []
-    for t in sample_texts:
-        all_skills.extend(extract_skills(t))
-    from collections import Counter
-    counts = Counter(all_skills).most_common(15)
-    return jsonify([{"skill": k, "count": v} for k, v in counts])
+
+    def compute():
+        df = get_df()
+        tmp = df.copy()
+        if cat:
+            tmp = tmp[tmp["category_label"].str.lower() == cat.lower()]
+        # Use pre-computed NLP or re-extract
+        sample_texts = tmp["description"].dropna().sample(min(500, len(tmp)), random_state=42).tolist()
+        all_skills = []
+        for t in sample_texts:
+            all_skills.extend(extract_skills(t))
+        from collections import Counter
+        counts = Counter(all_skills).most_common(15)
+        return [{"skill": k, "count": v} for k, v in counts]
+
+    return jsonify(_cached(("top-skills", cat), compute))
 
 
 # ─────────────────────────────────────────
@@ -420,21 +466,24 @@ def top_skills():
 # ─────────────────────────────────────────
 @app.route("/api/top-companies")
 def top_companies():
-    df = get_df()
     cat = request.args.get("category", None)
     limit = int(request.args.get("limit", 10))
 
-    tmp = df.copy()
-    if cat:
-        tmp = tmp[tmp["category_label"].str.lower() == cat.lower()]
+    def compute():
+        df = get_df()
+        tmp = df.copy()
+        if cat:
+            tmp = tmp[tmp["category_label"].str.lower() == cat.lower()]
 
-    counts = (
-        tmp[tmp["company"] != ""]["company"]
-        .value_counts()
-        .head(limit)
-    )
+        counts = (
+            tmp[tmp["company"] != ""]["company"]
+            .value_counts()
+            .head(limit)
+        )
 
-    return jsonify([{"company": k, "count": int(v)} for k, v in counts.items()])
+        return [{"company": k, "count": int(v)} for k, v in counts.items()]
+
+    return jsonify(_cached(("top-companies", cat, limit), compute))
 
 
 # ─────────────────────────────────────────
@@ -442,22 +491,25 @@ def top_companies():
 # ─────────────────────────────────────────
 @app.route("/api/salary-by-category")
 def salary_by_category():
-    df = get_df()
     limit = int(request.args.get("limit", 10))
 
-    tmp = df[df["salary_mid"].notna() & (df["category_label"] != "")]
+    def compute():
+        df = get_df()
+        tmp = df[df["salary_mid"].notna() & (df["category_label"] != "")]
 
-    top_cats = tmp["category_label"].value_counts().head(limit).index
-    avg_salary = (
-        tmp[tmp["category_label"].isin(top_cats)]
-        .groupby("category_label")["salary_mid"]
-        .mean()
-        .reindex(top_cats)
-    )
+        top_cats = tmp["category_label"].value_counts().head(limit).index
+        avg_salary = (
+            tmp[tmp["category_label"].isin(top_cats)]
+            .groupby("category_label")["salary_mid"]
+            .mean()
+            .reindex(top_cats)
+        )
 
-    return jsonify([
-        {"category": k, "avg_salary": float(v)} for k, v in avg_salary.items()
-    ])
+        return [
+            {"category": k, "avg_salary": float(v)} for k, v in avg_salary.items()
+        ]
+
+    return jsonify(_cached(("salary-by-category", limit), compute))
 
 
 # ─────────────────────────────────────────
@@ -465,23 +517,32 @@ def salary_by_category():
 # ─────────────────────────────────────────
 @app.route("/api/forecast")
 def forecast():
-    df = get_df()
-    df["month"] = pd.to_datetime(df["created"], errors="coerce").dt.to_period("M").astype(str)
-    monthly = df.groupby("month").size().reset_index(name="count").tail(12)
+    def compute():
+        df = get_df()
+        df = df.copy()
+        df["month"] = pd.to_datetime(df["created"], errors="coerce").dt.to_period("M").astype(str)
+        monthly = df.groupby("month").size().reset_index(name="count").tail(12)
 
-    # Simple linear trend forecast (3 months)
-    y = monthly["count"].values
-    x = np.arange(len(y))
-    coeffs = np.polyfit(x, y, 1)
-    future = [int(np.polyval(coeffs, len(y) + i)) for i in range(3)]
+        # Simple linear trend forecast (3 months)
+        y = monthly["count"].values
+        x = np.arange(len(y))
+        coeffs = np.polyfit(x, y, 1)
+        future = [int(np.polyval(coeffs, len(y) + i)) for i in range(3)]
 
-    return jsonify({
-        "historical": monthly.to_dict(orient="records"),
-        "forecast_months": 3,
-        "forecast_values": future
-    })
+        return {
+            "historical": monthly.to_dict(orient="records"),
+            "forecast_months": 3,
+            "forecast_values": future
+        }
 
-
+    return jsonify(_cached(("forecast",), compute))
 if __name__ == "__main__":
-    from waitress import serve
-    serve(app, host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 5000))
+
+    if os.environ.get("RENDER"):
+        from waitress import serve
+        print(f"Starting Waitress on port {port}")
+        serve(app, host="0.0.0.0", port=port)
+    else:
+        print(f"Starting Flask on port {port}")
+        app.run(host="127.0.0.1", port=port, debug=True)

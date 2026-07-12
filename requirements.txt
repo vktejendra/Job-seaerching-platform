@@ -8,23 +8,15 @@ flask==3.1.3
 flask-cors==6.0.5
 
 # Data Processing
-pandas==2.2.3
+pandas==3.0.3
 numpy==2.4.6
 
 # Machine Learning
 scikit-learn==1.9.0
 scipy==1.17.1
-# xgboost removed: model_training.py never actually imports/uses it (only
-# sklearn's GradientBoostingRegressor/RandomForestClassifier are used), and
-# the old 2.1.1 pin predates Python 3.14 -- pip would try to compile it from
-# source on Render, which is almost certainly what was breaking the build.
 
 # NLP
 spacy==3.8.13
-# 3.8.12 was yanked from PyPI (a maintainer-flagged bug, packages built
-# against it can fail to load models correctly). 3.8.14 turned out not to
-# exist as an installable release either -- 3.8.13 is the newest version
-# that's both listed and not yanked.
 # After install run: python -m spacy download en_core_web_sm
 
 # Visualisation
@@ -34,4 +26,5 @@ wordcloud==1.9.6
 
 # Utilities
 python-dotenv==1.2.2
-gunicorn==22.0.0         # production server
+waitress==3.0.2
+gunicorn==22.0.0
